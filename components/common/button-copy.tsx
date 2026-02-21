@@ -1,31 +1,29 @@
 "use client"
 
-import React, { useState } from "react"
-import { TextMorph } from "../motion-primitives/text-morph"
+import { Check, Copy } from "@phosphor-icons/react"
+import { useState } from "react"
 
 type ButtonCopyProps = {
   code: string
 }
 
 export function ButtonCopy({ code }: ButtonCopyProps) {
-  const [hasCopyLabel, setHasCopyLabel] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const onCopy = () => {
     navigator.clipboard.writeText(code)
-    setHasCopyLabel(true)
-
-    setTimeout(() => {
-      setHasCopyLabel(false)
-    }, 1000)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1000)
   }
 
   return (
     <button
       onClick={onCopy}
       type="button"
-      className="text-muted-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs"
+      className="text-muted-foreground hover:bg-muted flex size-7 items-center justify-center rounded-md transition"
+      aria-label={copied ? "Copied" : "Copy code"}
     >
-      <TextMorph as="span">{hasCopyLabel ? "Copied" : "Copy"}</TextMorph>
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
     </button>
   )
 }

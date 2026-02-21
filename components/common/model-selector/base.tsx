@@ -1,6 +1,6 @@
 "use client"
 
-import { PopoverContentAuth } from "@/app/components/chat-input/popover-content-auth"
+
 import { useBreakpoint } from "@/app/hooks/use-breakpoint"
 import { useKeyShortcut } from "@/app/hooks/use-key-shortcut"
 import { Button } from "@/components/ui/button"
@@ -136,19 +136,19 @@ export function ModelSelector({
     isModelHidden
   )
 
-  // Group models by provider, preserving order of first appearance
+  // Group models by providerId, preserving order of first appearance
   const groupedModels: { providerId: string; providerName: string; models: ModelConfig[] }[] =
     filteredModels.reduce(
       (groups, model) => {
-        const iconId = model.icon ?? "other"
-        const existing = groups.find((g) => g.providerId === iconId)
+        const pid = model.providerId ?? "other"
+        const existing = groups.find((g) => g.providerId === pid)
         if (existing) {
           existing.models.push(model)
         } else {
-          const provider = PROVIDERS.find((p) => p.id === iconId)
+          const provider = PROVIDERS.find((p) => p.id === pid)
           groups.push({
-            providerId: iconId,
-            providerName: provider?.name ?? iconId,
+            providerId: pid,
+            providerName: provider?.name ?? pid,
             models: [model],
           })
         }
@@ -175,37 +175,6 @@ export function ModelSelector({
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
     setSearchQuery(e.target.value)
-  }
-
-  // If user is not authenticated, show the auth popover
-  if (!isUserAuthenticated) {
-    return (
-      <Popover>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button
-                size="sm"
-                variant="secondary"
-                className={cn(
-                  "border-border dark:bg-secondary text-accent-foreground h-9 w-auto border bg-transparent",
-                  className
-                )}
-                type="button"
-              >
-                {currentProvider?.icon && (
-                  <currentProvider.icon className="size-5" />
-                )}
-                {currentModel?.name}
-                <CaretDownIcon className="size-4" />
-              </Button>
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent>Select a model</TooltipContent>
-        </Tooltip>
-        <PopoverContentAuth />
-      </Popover>
-    )
   }
 
   if (isMobile) {

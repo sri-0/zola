@@ -1,11 +1,9 @@
 import type { ContentPart, Message } from "@/app/types/api.types"
-import type { Database, Json } from "@/app/types/database.types"
-import type { SupabaseClient } from "@supabase/supabase-js"
+import { prisma } from "@/lib/db"
 
 const DEFAULT_STEP = 0
 
 export async function saveFinalAssistantMessage(
-  supabase: SupabaseClient<Database>,
   chatId: string,
   messages: Message[],
   message_group_id?: string,
@@ -74,19 +72,16 @@ export async function saveFinalAssistantMessage(
 
   const finalPlainText = textParts.join("\n\n")
 
-  const { error } = await supabase.from("messages").insert({
-    chat_id: chatId,
-    role: "assistant",
-    content: finalPlainText || "",
-    parts: parts as unknown as Json,
-    message_group_id,
-    model,
+  await prisma.message.create({
+    data: {
+      chatId,
+      role: "assistant",
+      content: finalPlainText || "",
+      parts: JSON.stringify(parts),
+      messageGroupId: message_group_id || null,
+      model: model || null,
+    },
   })
 
-  if (error) {
-    console.error("Error saving final assistant message:", error)
-    throw new Error(`Failed to save assistant message: ${error.message}`)
-  } else {
-    console.log("Assistant message saved successfully (merged).")
-  }
+  console.log("Assistant message saved successfully (merged).")
 }

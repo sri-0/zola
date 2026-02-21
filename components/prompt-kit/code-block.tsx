@@ -43,6 +43,7 @@ function CodeBlockCode({
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!code) return
     async function highlight() {
       const html = await codeToHtml(code, {
         lang: language,

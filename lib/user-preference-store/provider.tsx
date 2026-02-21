@@ -17,9 +17,6 @@ export {
   convertToApiFormat,
 }
 
-const PREFERENCES_STORAGE_KEY = "user-preferences"
-const LAYOUT_STORAGE_KEY = "preferred-layout"
-
 interface UserPreferencesContextType {
   preferences: UserPreferences
   setLayout: (layout: LayoutType) => void
@@ -64,134 +61,44 @@ async function updateUserPreferences(
   return convertFromApiFormat(data)
 }
 
-function getLocalStoragePreferences(): UserPreferences {
-  if (typeof window === "undefined") return defaultPreferences
-
-  const stored = localStorage.getItem(PREFERENCES_STORAGE_KEY)
-  if (stored) {
-    try {
-      return JSON.parse(stored)
-    } catch {
-      // fallback to legacy layout storage if JSON parsing fails
-    }
-  }
-
-  const layout = localStorage.getItem(LAYOUT_STORAGE_KEY) as LayoutType | null
-  return {
-    ...defaultPreferences,
-    ...(layout ? { layout } : {}),
-  }
-}
-
-function saveToLocalStorage(preferences: UserPreferences) {
-  if (typeof window === "undefined") return
-
-  localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences))
-  localStorage.setItem(LAYOUT_STORAGE_KEY, preferences.layout)
-}
-
 export function UserPreferencesProvider({
   children,
-  userId,
-  initialPreferences,
 }: {
   children: ReactNode
-  userId?: string
-  initialPreferences?: UserPreferences
 }) {
-  const isAuthenticated = !!userId
   const queryClient = useQueryClient()
+  const queryKey = ["user-preferences"]
 
-  // Merge initial preferences with defaults
-  const getInitialData = (): UserPreferences => {
-    if (initialPreferences && isAuthenticated) {
-      return initialPreferences
-    }
-
-    if (!isAuthenticated) {
-      return getLocalStoragePreferences()
-    }
-
-    return defaultPreferences
-  }
-
-  // Query for user preferences
-  const { data: preferences = getInitialData(), isLoading } =
+  const { data: preferences = defaultPreferences, isLoading } =
     useQuery<UserPreferences>({
-      queryKey: ["user-preferences", userId],
-      queryFn: async () => {
-        if (!isAuthenticated) {
-          return getLocalStoragePreferences()
-        }
-
-        try {
-          return await fetchUserPreferences()
-        } catch (error) {
-          console.error(
-            "Failed to fetch user preferences, falling back to localStorage:",
-            error
-          )
-          return getLocalStoragePreferences()
-        }
-      },
+      queryKey,
+      queryFn: fetchUserPreferences,
       enabled: typeof window !== "undefined",
-      staleTime: 1000 * 60 * 5, // 5 minutes
-      retry: (failureCount, error) => {
-        // Only retry for authenticated users and network errors
-        return isAuthenticated && failureCount < 2
-      },
-      // Use initial data if available to avoid unnecessary API calls
-      initialData:
-        initialPreferences && isAuthenticated ? getInitialData() : undefined,
+      staleTime: 1000 * 60 * 5,
     })
 
-  // Mutation for updating preferences
   const mutation = useMutation({
-    mutationFn: async (update: Partial<UserPreferences>) => {
-      const updated = { ...preferences, ...update }
-
-      if (!isAuthenticated) {
-        saveToLocalStorage(updated)
-        return updated
-      }
-
-      try {
-        return await updateUserPreferences(update)
-      } catch (error) {
-        console.error(
-          "Failed to update user preferences in database, falling back to localStorage:",
-          error
-        )
-        saveToLocalStorage(updated)
-        return updated
-      }
-    },
+    mutationFn: updateUserPreferences,
     onMutate: async (update) => {
-      const queryKey = ["user-preferences", userId]
       await queryClient.cancelQueries({ queryKey })
-
       const previous = queryClient.getQueryData<UserPreferences>(queryKey)
-      const optimistic = { ...previous, ...update }
-      queryClient.setQueryData(queryKey, optimistic)
-
+      queryClient.setQueryData(queryKey, { ...previous, ...update })
       return { previous }
     },
     onError: (_err, _update, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(["user-preferences", userId], context.previous)
+        queryClient.setQueryData(queryKey, context.previous)
       }
     },
     onSuccess: (data) => {
-      queryClient.setQueryData(["user-preferences", userId], data)
+      queryClient.setQueryData(queryKey, data)
     },
   })
 
   const updatePreferences = mutation.mutate
 
   const setLayout = (layout: LayoutType) => {
-    if (isAuthenticated || layout === "fullscreen") {
-      updatePreferences({ layout })
-    }
+    updatePreferences({ layout })
   }
 
   const setPromptSuggestions = (enabled: boolean) => {

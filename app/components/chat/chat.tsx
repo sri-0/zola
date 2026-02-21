@@ -12,22 +12,11 @@ import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
 import { AnimatePresence, motion } from "motion/react"
-import dynamic from "next/dynamic"
 import { redirect } from "next/navigation"
 import { useCallback, useMemo, useState } from "react"
 import { useChatCore } from "./use-chat-core"
 import { useChatOperations } from "./use-chat-operations"
 import { useFileUpload } from "./use-file-upload"
-
-const FeedbackWidget = dynamic(
-  () => import("./feedback-widget").then((mod) => mod.FeedbackWidget),
-  { ssr: false }
-)
-
-const DialogAuth = dynamic(
-  () => import("./dialog-auth").then((mod) => mod.DialogAuth),
-  { ssr: false }
-)
 
 export function Chat() {
   const { chatId } = useChatSession()
@@ -68,8 +57,6 @@ export function Chat() {
     chatId,
   })
 
-  // State to pass between hooks
-  const [hasDialogAuth, setHasDialogAuth] = useState(false)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
   const systemPrompt = useMemo(
     () => user?.system_prompt || SYSTEM_PROMPT_DEFAULT,
@@ -97,7 +84,6 @@ export function Chat() {
       selectedModel,
       systemPrompt,
       createNewChat,
-      setHasDialogAuth,
       setMessages: () => {},
       setInput: () => {},
     })
@@ -224,8 +210,6 @@ export function Chat() {
         "@container/main relative flex h-full flex-col items-center justify-end md:justify-center"
       )}
     >
-      <DialogAuth open={hasDialogAuth} setOpen={setHasDialogAuth} />
-
       <AnimatePresence initial={false} mode="popLayout">
         {showOnboarding ? (
           <motion.div
@@ -266,7 +250,6 @@ export function Chat() {
         <ChatInput {...chatInputProps} />
       </motion.div>
 
-      <FeedbackWidget authUserId={user?.id} />
     </div>
   )
 }

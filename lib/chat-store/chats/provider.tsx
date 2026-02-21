@@ -47,26 +47,18 @@ export function useChats() {
   return context
 }
 
-export function ChatsProvider({
-  userId,
-  children,
-}: {
-  userId?: string
-  children: React.ReactNode
-}) {
+export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const [chats, setChats] = useState<Chats[]>([])
 
   useEffect(() => {
-    if (!userId) return
-
     const load = async () => {
       setIsLoading(true)
       const cached = await getCachedChats()
       setChats(cached)
 
       try {
-        const fresh = await fetchAndCacheChats(userId)
+        const fresh = await fetchAndCacheChats()
         setChats(fresh)
       } finally {
         setIsLoading(false)
@@ -74,12 +66,10 @@ export function ChatsProvider({
     }
 
     load()
-  }, [userId])
+  }, [])
 
   const refresh = async () => {
-    if (!userId) return
-
-    const fresh = await fetchAndCacheChats(userId)
+    const fresh = await fetchAndCacheChats()
     setChats(fresh)
   }
 

@@ -60,6 +60,7 @@ export function useChatCore({
   // Refs and derived state
   const hasSentFirstMessageRef = useRef(false)
   const prevChatIdRef = useRef<string | null>(chatId)
+  const setMessagesRef = useRef<((updater: Message[] | ((prev: Message[]) => Message[])) => void) | null>(null)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
   const systemPrompt = useMemo(
     () => user?.system_prompt || SYSTEM_PROMPT_DEFAULT,
@@ -73,20 +74,23 @@ export function useChatCore({
   // Chats operations
   const { updateTitle } = useChats()
 
-  // Handle errors directly in onError callback
+  // Inject API errors as an assistant message in the conversation
   const handleError = useCallback((error: Error) => {
     console.error("Chat error:", error)
-    console.error("Error message:", error.message)
     let errorMsg = error.message || "Something went wrong."
 
     if (errorMsg === "An error occurred" || errorMsg === "fetch failed") {
       errorMsg = "Something went wrong. Please try again."
     }
 
-    toast({
-      title: errorMsg,
-      status: "error",
-    })
+    const errorMessage: Message = {
+      id: `error-${Date.now()}`,
+      role: "assistant",
+      content: errorMsg,
+      createdAt: new Date(),
+    }
+
+    setMessagesRef.current?.((prev) => [...prev, errorMessage])
   }, [])
 
   // Initialize useChat
@@ -124,6 +128,11 @@ export function useChatCore({
     onError: handleError,
   })
 
+  // Keep setMessagesRef current so handleError can call it
+  useEffect(() => {
+    setMessagesRef.current = setMessages
+  }, [setMessages])
+
   // Handle search params on mount
   useEffect(() => {
     if (prompt && typeof window !== "undefined") {
@@ -132,14 +141,12 @@ export function useChatCore({
   }, [prompt, setInput])
 
   // Reset messages when navigating from a chat to home
-  if (
-    prevChatIdRef.current !== null &&
-    chatId === null &&
-    messages.length > 0
-  ) {
-    setMessages([])
-  }
-  prevChatIdRef.current = chatId
+  useEffect(() => {
+    if (prevChatIdRef.current !== null && chatId === null && messages.length > 0) {
+      setMessages([])
+    }
+    prevChatIdRef.current = chatId
+  }, [chatId])
 
   // Submit action
   const submit = useCallback(async () => {

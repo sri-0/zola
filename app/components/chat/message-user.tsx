@@ -15,8 +15,6 @@ import {
   MessageContent,
 } from "@/components/prompt-kit/message"
 import { Button } from "@/components/ui/button"
-import { toast } from "@/components/ui/toast"
-import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { cn } from "@/lib/utils"
 import { Message as MessageType } from "@ai-sdk/react"
 import {
@@ -71,18 +69,8 @@ export function MessageUser({
 
   const handleSave = async () => {
     if (!editInput.trim()) return
-    const UUIDLength = 36
 
     try {
-      if (isSupabaseEnabled && id && id.length !== UUIDLength) {
-        // Message IDs failed to sync
-        toast({
-          title: "Oops, something went wrong",
-          description: "Please refresh your browser and try again.",
-          status: "error",
-        })
-        return
-      }
       onEdit?.(id, editInput)
     } catch {
       setEditInput(children) // Reset on failure
