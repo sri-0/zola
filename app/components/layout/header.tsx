@@ -34,10 +34,11 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
                 className="pointer-events-auto inline-flex items-center text-xl font-medium tracking-tight"
               >
                 <ZolaIcon className="mr-1 size-4" />
-                {APP_NAME}
+                <span className="gradient-text">{APP_NAME}</span>
               </Link>
               {hasSidebar && isMobile && <HeaderSidebarTrigger />}
             </div>
+
           </div>
           <div />
           {!isLoggedIn ? (
