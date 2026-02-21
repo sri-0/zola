@@ -21,6 +21,7 @@ import { useChats } from "@/lib/chat-store/chats/provider"
 import { APP_NAME } from "@/lib/config"
 import { useUser } from "@/lib/user-store/provider"
 import {
+  Books,
   ChatTeardropText,
   MagnifyingGlass,
   NotePencilIcon,
@@ -90,6 +91,16 @@ export function AppSidebar() {
                   />
                 </SidebarMenuItem>
               )}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Prompt Library"
+                  onClick={() => router.push("/prompts")}
+                  className="text-sidebar-foreground/80"
+                >
+                  <Books className="size-4" />
+                  <span>Prompt Library</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

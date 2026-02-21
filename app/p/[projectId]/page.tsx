@@ -1,6 +1,5 @@
 import { LayoutApp } from "@/app/components/layout/layout-app"
 import { ProjectView } from "@/app/p/[projectId]/project-view"
-import { MessagesProvider } from "@/lib/chat-store/messages/provider"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
@@ -35,10 +34,8 @@ export default async function Page({ params }: Props) {
   }
 
   return (
-    <MessagesProvider>
-      <LayoutApp>
-        <ProjectView projectId={projectId} key={projectId} />
-      </LayoutApp>
-    </MessagesProvider>
+    <LayoutApp>
+      <ProjectView projectId={projectId} key={projectId} />
+    </LayoutApp>
   )
 }
