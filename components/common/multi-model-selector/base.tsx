@@ -16,6 +16,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
@@ -156,6 +158,27 @@ export function MultiModelSelector({
     searchQuery,
     isModelHidden
   )
+
+  // Group models by providerId, preserving order of first appearance
+  const groupedModels: { providerId: string; providerName: string; models: ModelConfig[] }[] =
+    filteredModels.reduce(
+      (groups, model) => {
+        const pid = model.providerId ?? "other"
+        const existing = groups.find((g) => g.providerId === pid)
+        if (existing) {
+          existing.models.push(model)
+        } else {
+          const provider = PROVIDERS.find((p) => p.id === pid)
+          groups.push({
+            providerId: pid,
+            providerName: provider?.name ?? pid,
+            models: [model],
+          })
+        }
+        return groups
+      },
+      [] as { providerId: string; providerName: string; models: ModelConfig[] }[]
+    )
 
   if (isLoadingModels) {
     return null
@@ -368,7 +391,17 @@ export function MultiModelSelector({
                   </p>
                 </div>
               ) : filteredModels.length > 0 ? (
-                filteredModels.map((model) => renderModelItem(model))
+                groupedModels.map((group, groupIndex) => (
+                  <div key={group.providerId}>
+                    {groupIndex > 0 && (
+                      <div className="border-border mx-0 my-1 border-t" />
+                    )}
+                    <p className="text-muted-foreground px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide">
+                      {group.providerName}
+                    </p>
+                    {group.models.map((model) => renderModelItem(model))}
+                  </div>
+                ))
               ) : (
                 <div className="flex h-full flex-col items-center justify-center p-6 text-center">
                   <p className="text-muted-foreground mb-2 text-sm">
@@ -448,52 +481,51 @@ export function MultiModelSelector({
                   </p>
                 </div>
               ) : filteredModels.length > 0 ? (
-                filteredModels.map((model) => {
-                  const isLocked = !model.accessible
-                  const isSelected = selectedModelIds.includes(model.id)
-                  const provider = PROVIDERS.find(
-                    (provider) => provider.id === model.icon
-                  )
-
-                  return (
-                    <DropdownMenuItem
-                      key={model.id}
-                      className={cn(
-                        "flex w-full items-center justify-between px-3 py-2",
-                        isSelected && "bg-accent"
-                      )}
-                      onSelect={(e) => {
-                        e.preventDefault()
-                        handleModelToggle(model.id, isLocked)
-                      }}
-                      onFocus={() => {
-                        if (isDropdownOpen) {
-                          setHoveredModel(model.id)
-                        }
-                      }}
-                      onMouseEnter={() => {
-                        if (isDropdownOpen) {
-                          setHoveredModel(model.id)
-                        }
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        {provider?.icon && <provider.icon className="size-5" />}
-                        <div className="flex flex-col gap-0">
-                          <span className="text-sm">{model.name}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {isSelected && <CheckIcon className="size-4" />}
-                        {isLocked && (
-                          <div className="border-input bg-accent text-muted-foreground flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
-                            <span>Locked</span>
+                groupedModels.map((group, groupIndex) => (
+                  <div key={group.providerId}>
+                    {groupIndex > 0 && <DropdownMenuSeparator />}
+                    <DropdownMenuLabel className="text-muted-foreground px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide">
+                      {group.providerName}
+                    </DropdownMenuLabel>
+                    {group.models.map((model) => {
+                      const isLocked = !model.accessible
+                      const isSelected = selectedModelIds.includes(model.id)
+                      const provider = PROVIDERS.find((p) => p.id === model.icon)
+                      return (
+                        <DropdownMenuItem
+                          key={model.id}
+                          className={cn(
+                            "flex w-full items-center justify-between px-3 py-2",
+                            isSelected && "bg-accent"
+                          )}
+                          onSelect={(e) => {
+                            e.preventDefault()
+                            handleModelToggle(model.id, isLocked)
+                          }}
+                          onFocus={() => {
+                            if (isDropdownOpen) setHoveredModel(model.id)
+                          }}
+                          onMouseEnter={() => {
+                            if (isDropdownOpen) setHoveredModel(model.id)
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            {provider?.icon && <provider.icon className="size-5" />}
+                            <span className="text-sm">{model.name}</span>
                           </div>
-                        )}
-                      </div>
-                    </DropdownMenuItem>
-                  )
-                })
+                          <div className="flex items-center gap-2">
+                            {isSelected && <CheckIcon className="size-4" />}
+                            {isLocked && (
+                              <div className="border-input bg-accent text-muted-foreground flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
+                                <span>Locked</span>
+                              </div>
+                            )}
+                          </div>
+                        </DropdownMenuItem>
+                      )
+                    })}
+                  </div>
+                ))
               ) : (
                 <div className="flex h-full flex-col items-center justify-center p-6 text-center">
                   <p className="text-muted-foreground mb-1 text-sm">

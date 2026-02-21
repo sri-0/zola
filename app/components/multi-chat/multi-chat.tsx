@@ -12,7 +12,7 @@ import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
 import { Message as MessageType } from "@ai-sdk/react"
 import { AnimatePresence, motion } from "motion/react"
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { MultiChatInput } from "./multi-chat-input"
 import { useMultiChat } from "./use-multi-chat"
 
@@ -75,14 +75,24 @@ export function MultiChat() {
     return modelsInLastGroup
   }, [persistedMessages])
 
-  const allModelsToMaintain = useMemo(() => {
-    const combined = [...new Set([...selectedModelIds, ...modelsFromPersisted])]
-    return availableModels.filter((model) => combined.includes(model.id))
-  }, [availableModels, selectedModelIds, modelsFromPersisted])
+  // Restore model selection from last group when persisted messages load.
+  // Must be in an effect — never call setState during render.
+  useEffect(() => {
+    if (selectedModelIds.length === 0 && modelsFromLastGroup.length > 0) {
+      setSelectedModelIds(modelsFromLastGroup)
+    }
+  }, [modelsFromLastGroup])
 
-  if (selectedModelIds.length === 0 && modelsFromLastGroup.length > 0) {
-    setSelectedModelIds(modelsFromLastGroup)
-  }
+  // Keep models ordered by selection order so the hook-to-model index mapping
+  // in useMultiChat stays stable while streaming (API loads must not reorder).
+  const allModelsToMaintain = useMemo(() => {
+    const allIds = [...new Set([...selectedModelIds, ...modelsFromPersisted])]
+    return allIds.reduce<typeof availableModels>((acc, id) => {
+      const model = availableModels.find((m) => m.id === id)
+      if (model) acc.push(model)
+      return acc
+    }, [])
+  }, [availableModels, selectedModelIds, modelsFromPersisted])
 
   const modelChats = useMultiChat(allModelsToMaintain)
   const systemPrompt = useMemo(
@@ -200,7 +210,6 @@ export function MultiChat() {
             }
           } else if (
             chat.isLoading &&
-            userMsg.content === prompt &&
             selectedModelIds.includes(chat.model.id)
           ) {
             const placeholderMessage: MessageType = {
@@ -359,17 +368,22 @@ export function MultiChat() {
     ]
   )
 
-  const showOnboarding = messageGroups.length === 0 && !messagesLoading
+  // Controls layout/position — no dependency on loading so the input doesn't
+  // animate from bottom→center when the API resolves with zero messages.
+  const showOnboardingLayout = messageGroups.length === 0
+  // Controls whether the heading text is rendered — still gated on loading so
+  // it doesn't flash for a chat that has history being fetched.
+  const showOnboardingContent = messageGroups.length === 0 && !messagesLoading
 
   return (
     <div
       className={cn(
         "@container/main relative flex h-full flex-col items-center",
-        showOnboarding ? "justify-end md:justify-center" : "justify-end"
+        showOnboardingLayout ? "justify-end md:justify-center" : "justify-end"
       )}
     >
       <AnimatePresence initial={false} mode="popLayout">
-        {showOnboarding ? (
+        {showOnboardingContent ? (
           <motion.div
             key="onboarding"
             className="absolute bottom-[60%] mx-auto max-w-[50rem] md:relative md:bottom-auto"
@@ -402,7 +416,7 @@ export function MultiChat() {
       <motion.div
         className={cn(
           "z-50 mx-auto w-full max-w-3xl",
-          showOnboarding ? "relative" : "absolute right-0 bottom-0 left-0"
+          showOnboardingLayout ? "relative" : "absolute right-0 bottom-0 left-0"
         )}
         layout="position"
         layoutId="multi-chat-input-container"

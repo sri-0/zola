@@ -14,14 +14,8 @@ type UserContextType = {
 
 const UserContext = createContext<UserContextType | undefined>(undefined)
 
-export function UserProvider({
-  children,
-  initialUser,
-}: {
-  children: React.ReactNode
-  initialUser: UserProfile | null
-}) {
-  const [user] = useState<UserProfile | null>(initialUser ?? LOCAL_USER)
+export function UserProvider({ children }: { children: React.ReactNode }) {
+  const [user] = useState<UserProfile | null>(LOCAL_USER)
 
   const refreshUser = async () => {}
   const updateUser = async (_updates: Partial<UserProfile>) => {}

@@ -136,19 +136,19 @@ export function ModelSelector({
     isModelHidden
   )
 
-  // Group models by provider, preserving order of first appearance
+  // Group models by providerId, preserving order of first appearance
   const groupedModels: { providerId: string; providerName: string; models: ModelConfig[] }[] =
     filteredModels.reduce(
       (groups, model) => {
-        const iconId = model.icon ?? "other"
-        const existing = groups.find((g) => g.providerId === iconId)
+        const pid = model.providerId ?? "other"
+        const existing = groups.find((g) => g.providerId === pid)
         if (existing) {
           existing.models.push(model)
         } else {
-          const provider = PROVIDERS.find((p) => p.id === iconId)
+          const provider = PROVIDERS.find((p) => p.id === pid)
           groups.push({
-            providerId: iconId,
-            providerName: provider?.name ?? iconId,
+            providerId: pid,
+            providerName: provider?.name ?? pid,
             models: [model],
           })
         }

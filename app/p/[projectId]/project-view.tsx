@@ -18,7 +18,7 @@ import { useChat } from "@ai-sdk/react"
 import { ChatCircleIcon } from "@phosphor-icons/react"
 import { useQuery } from "@tanstack/react-query"
 import { AnimatePresence, motion } from "motion/react"
-import { usePathname } from "next/navigation"
+import { useParams, usePathname } from "next/navigation"
 import { useCallback, useMemo, useState } from "react"
 
 type Project = {
@@ -28,11 +28,8 @@ type Project = {
   created_at: string
 }
 
-type ProjectViewProps = {
-  projectId: string
-}
-
-export function ProjectView({ projectId }: ProjectViewProps) {
+export function ProjectView() {
+  const { projectId } = useParams<{ projectId: string }>()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)

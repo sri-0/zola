@@ -17,7 +17,7 @@ async function apiGet<T>(path: string): Promise<T | null> {
   }
 }
 
-export async function getChatsForUserInDb(_userId: string): Promise<Chats[]> {
+export async function getChatsForUserInDb(): Promise<Chats[]> {
   const data = await apiGet<Chats[]>("/api/chats")
   return data || []
 }
@@ -38,8 +38,8 @@ export async function deleteChatInDb(id: string) {
   })
 }
 
-export async function getAllUserChatsInDb(userId: string): Promise<Chats[]> {
-  return getChatsForUserInDb(userId)
+export async function getAllUserChatsInDb(): Promise<Chats[]> {
+  return getChatsForUserInDb()
 }
 
 export async function createChatInDb(
@@ -61,8 +61,8 @@ export async function createChatInDb(
   }
 }
 
-export async function fetchAndCacheChats(userId: string): Promise<Chats[]> {
-  const data = await getChatsForUserInDb(userId)
+export async function fetchAndCacheChats(): Promise<Chats[]> {
+  const data = await getChatsForUserInDb()
 
   if (data.length > 0) {
     await writeToIndexedDB("chats", data)
@@ -104,8 +104,8 @@ export async function getChat(chatId: string): Promise<Chat | null> {
   return (all as Chat[]).find((c) => c.id === chatId) || null
 }
 
-export async function getUserChats(userId: string): Promise<Chat[]> {
-  const data = await getAllUserChatsInDb(userId)
+export async function getUserChats(): Promise<Chat[]> {
+  const data = await getAllUserChatsInDb()
   if (!data) return []
   await writeToIndexedDB("chats", data)
   return data
