@@ -11,13 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useState } from "react"
 import { toast } from "sonner"
@@ -35,9 +29,7 @@ export function DialogCreatePrompt({
 }: DialogCreatePromptProps) {
   const [title, setTitle] = useState("")
   const [content, setContent] = useState("")
-  const [category, setCategory] = useState<"user-private" | "user-shared">(
-    "user-private"
-  )
+  const [isPublic, setIsPublic] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const isValid = title.trim().length > 0 && content.trim().length > 0
@@ -50,7 +42,11 @@ export function DialogCreatePrompt({
       const res = await fetch("/api/prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), content: content.trim(), category }),
+        body: JSON.stringify({
+          title: title.trim(),
+          content: content.trim(),
+          isPublic,
+        }),
       })
 
       if (!res.ok) {
@@ -71,7 +67,7 @@ export function DialogCreatePrompt({
   function handleClose() {
     setTitle("")
     setContent("")
-    setCategory("user-private")
+    setIsPublic(false)
     onOpenChange(false)
   }
 
@@ -86,35 +82,15 @@ export function DialogCreatePrompt({
         </DialogHeader>
 
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto py-2">
-          <div className="grid grid-cols-[1fr_auto] gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="prompt-title">Title</Label>
-              <Input
-                id="prompt-title"
-                placeholder="e.g. Expert Code Reviewer"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                maxLength={100}
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label>Visibility</Label>
-              <Select
-                value={category}
-                onValueChange={(v) =>
-                  setCategory(v as "user-private" | "user-shared")
-                }
-              >
-                <SelectTrigger className="w-36">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user-private">Private</SelectItem>
-                  <SelectItem value="user-shared">Shared</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="prompt-title">Title</Label>
+            <Input
+              id="prompt-title"
+              placeholder="e.g. Expert Code Reviewer"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={100}
+            />
           </div>
 
           <div className="flex flex-1 flex-col gap-1.5">
@@ -130,6 +106,20 @@ export function DialogCreatePrompt({
               value={content}
               onChange={(e) => setContent(e.target.value)}
               className="min-h-[280px] flex-1 resize-none font-mono text-sm leading-relaxed"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium">Share with community</p>
+              <p className="text-muted-foreground text-xs">
+                Others will be able to see and use this prompt
+              </p>
+            </div>
+            <Switch
+              id="prompt-public"
+              checked={isPublic}
+              onCheckedChange={setIsPublic}
             />
           </div>
         </div>

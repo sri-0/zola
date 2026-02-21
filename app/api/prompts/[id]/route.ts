@@ -13,10 +13,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Prompt not found" }, { status: 404 })
   }
 
-  const prompt = promptStore[index]
-
-  // Only allow deleting user's own prompts (not system prompts)
-  if (prompt.userId !== MOCK_USER_ID) {
+  if (promptStore[index].userId !== MOCK_USER_ID) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

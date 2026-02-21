@@ -1,46 +1,55 @@
 import { NextRequest, NextResponse } from "next/server"
 import { MOCK_USER_ID, promptStore } from "./_store"
 
-export type PromptCategory = "system" | "user-private" | "user-shared"
-
 export type Prompt = {
   id: string
   title: string
   content: string
-  category: PromptCategory
+  promptType: "system" | "user"
+  isPublic: boolean
   userCreated: string | null
   userCreatedDate: string | null
   userId: string | null
 }
 
 export async function GET(request: NextRequest) {
-  const search = request.nextUrl.searchParams.get("search")?.toLowerCase().trim() ?? ""
+  const { searchParams } = request.nextUrl
+  const search = searchParams.get("search")?.toLowerCase().trim() ?? ""
+  const type = searchParams.get("type") // "system" | "user"
+  const publicParam = searchParams.get("public") // "true" | "false"
 
-  const results = search
-    ? promptStore.filter(
-        (p) =>
-          p.title.toLowerCase().includes(search) ||
-          p.content.toLowerCase().includes(search)
-      )
-    : promptStore
+  let results = [...promptStore]
+
+  if (type === "system") {
+    results = results.filter((p) => p.promptType === "system")
+  } else if (type === "user") {
+    results = results.filter((p) => p.promptType === "user")
+  }
+
+  if (publicParam === "true") {
+    results = results.filter((p) => p.isPublic)
+  } else if (publicParam === "false") {
+    results = results.filter((p) => !p.isPublic)
+  }
+
+  if (search) {
+    results = results.filter(
+      (p) =>
+        p.title.toLowerCase().includes(search) ||
+        p.content.toLowerCase().includes(search)
+    )
+  }
 
   return NextResponse.json(results)
 }
 
 export async function POST(request: NextRequest) {
   const body = await request.json()
-  const { title, content, category } = body
+  const { title, content, isPublic } = body
 
-  if (!title || !content || !category) {
+  if (!title || !content) {
     return NextResponse.json(
-      { error: "title, content, and category are required" },
-      { status: 400 }
-    )
-  }
-
-  if (!["user-private", "user-shared"].includes(category)) {
-    return NextResponse.json(
-      { error: "category must be user-private or user-shared" },
+      { error: "title and content are required" },
       { status: 400 }
     )
   }
@@ -49,7 +58,8 @@ export async function POST(request: NextRequest) {
     id: crypto.randomUUID(),
     title,
     content,
-    category,
+    promptType: "user",
+    isPublic: Boolean(isPublic),
     userCreated: "You",
     userCreatedDate: new Date().toISOString(),
     userId: MOCK_USER_ID,

@@ -19,18 +19,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Trash, Eye } from "@phosphor-icons/react"
+import { Eye, Trash } from "@phosphor-icons/react"
 import { useState } from "react"
 
 const MOCK_USER_ID = "mock-user-123"
-
-export type PromptCategory = "system" | "user-private" | "user-shared"
 
 export type Prompt = {
   id: string
   title: string
   content: string
-  category: PromptCategory
+  promptType: "system" | "user"
+  isPublic: boolean
   userCreated: string | null
   userCreatedDate: string | null
   userId: string | null
@@ -63,12 +62,11 @@ export function PromptCard({ prompt, onDelete }: PromptCardProps) {
         className="bg-card border-border hover:border-border/80 group relative flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-shadow hover:shadow-sm"
         onClick={() => setViewOpen(true)}
       >
-        {/* Header row */}
+        {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <h3 className="text-foreground line-clamp-1 font-medium leading-snug">
             {prompt.title}
           </h3>
-          {/* Action buttons — visible on hover */}
           <div
             className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100"
             onClick={(e) => e.stopPropagation()}
@@ -97,13 +95,20 @@ export function PromptCard({ prompt, onDelete }: PromptCardProps) {
         </div>
 
         {/* Meta */}
-        <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
-          {prompt.userCreated ? (
-            <span>{prompt.userCreated}</span>
-          ) : (
-            <Badge variant="secondary" className="text-xs px-1.5 py-0">
+        <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-xs">
+          {prompt.promptType === "system" ? (
+            <Badge variant="secondary" className="px-1.5 py-0 text-xs">
               Built-in
             </Badge>
+          ) : (
+            <>
+              <span>{prompt.userCreated}</span>
+              {prompt.isPublic && (
+                <Badge variant="outline" className="px-1.5 py-0 text-xs">
+                  Shared
+                </Badge>
+              )}
+            </>
           )}
           {prompt.userCreatedDate && (
             <>
@@ -124,14 +129,21 @@ export function PromptCard({ prompt, onDelete }: PromptCardProps) {
         <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{prompt.title}</DialogTitle>
-            {prompt.userCreated && (
-              <p className="text-muted-foreground text-sm">
-                {prompt.userCreated}
-                {prompt.userCreatedDate && (
-                  <> · {formatDate(prompt.userCreatedDate)}</>
-                )}
-              </p>
-            )}
+            <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
+              {prompt.promptType === "system" ? (
+                <Badge variant="secondary" className="text-xs">Built-in</Badge>
+              ) : (
+                <>
+                  <span>{prompt.userCreated}</span>
+                  {prompt.isPublic && (
+                    <Badge variant="outline" className="text-xs">Shared</Badge>
+                  )}
+                </>
+              )}
+              {prompt.userCreatedDate && (
+                <span>· {formatDate(prompt.userCreatedDate)}</span>
+              )}
+            </div>
           </DialogHeader>
           <div className="prose dark:prose-invert prose-sm max-w-none flex-1 overflow-y-auto">
             <Markdown>{prompt.content}</Markdown>
