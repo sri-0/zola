@@ -1,10 +1,7 @@
-import { updateSession } from "@/utils/supabase/middleware"
 import { NextResponse, type NextRequest } from "next/server"
 import { validateCsrfToken } from "./lib/csrf"
 
 export async function middleware(request: NextRequest) {
-  const response = await updateSession(request)
-
   // CSRF protection for state-changing requests
   if (["POST", "PUT", "DELETE"].includes(request.method)) {
     const csrfCookie = request.cookies.get("csrf_token")?.value
@@ -17,6 +14,8 @@ export async function middleware(request: NextRequest) {
 
   // CSP for development and production
   const isDev = process.env.NODE_ENV === "development"
+
+  const response = NextResponse.next()
 
   response.headers.set(
     "Content-Security-Policy",

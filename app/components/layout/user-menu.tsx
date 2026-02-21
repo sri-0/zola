@@ -18,7 +18,6 @@ import { useUser } from "@/lib/user-store/provider"
 import { GithubLogoIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 import { AppInfoTrigger } from "./app-info/app-info-trigger"
-import { FeedbackTrigger } from "./feedback/feedback-trigger"
 import { SettingsTrigger } from "./settings/settings-trigger"
 
 export function UserMenu() {
@@ -70,7 +69,6 @@ export function UserMenu() {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <SettingsTrigger onOpenChange={handleSettingsOpenChange} />
-        <FeedbackTrigger />
         <AppInfoTrigger />
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>

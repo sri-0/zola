@@ -18,7 +18,6 @@ type UseChatOperationsProps = {
     isAuthenticated?: boolean,
     systemPrompt?: string
   ) => Promise<Chats | undefined>
-  setHasDialogAuth: (value: boolean) => void
   setMessages: (
     messages: Message[] | ((messages: Message[]) => Message[])
   ) => void
@@ -32,7 +31,6 @@ export function useChatOperations({
   selectedModel,
   systemPrompt,
   createNewChat,
-  setHasDialogAuth,
   setMessages,
 }: UseChatOperationsProps) {
   // Chat utilities

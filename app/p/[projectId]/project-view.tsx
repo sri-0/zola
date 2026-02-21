@@ -171,7 +171,6 @@ export function ProjectView() {
     selectedModel,
     systemPrompt: SYSTEM_PROMPT_DEFAULT,
     createNewChat,
-    setHasDialogAuth: () => {}, // Not used in project context
     setMessages,
     setInput,
   })
