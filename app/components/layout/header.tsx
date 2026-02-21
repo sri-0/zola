@@ -29,15 +29,17 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
         <div className="flex flex-1 items-center justify-between">
           <div className="-ml-0.5 flex flex-1 items-center gap-2 lg:-ml-2.5">
             <div className="flex flex-1 items-center gap-2">
+              {/* Logo only on mobile — desktop shows it in the sidebar */}
               <Link
                 href="/"
-                className="pointer-events-auto inline-flex items-center text-xl font-medium tracking-tight"
+                className="pointer-events-auto inline-flex items-center text-xl font-medium tracking-tight md:hidden"
               >
                 <ZolaIcon className="mr-1 size-4" />
-                {APP_NAME}
+                <span className="gradient-text">{APP_NAME}</span>
               </Link>
               {hasSidebar && isMobile && <HeaderSidebarTrigger />}
             </div>
+
           </div>
           <div />
           {!isLoggedIn ? (

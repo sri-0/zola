@@ -9,8 +9,13 @@ import {
 } from "@/components/prompt-kit/prompt-input"
 import { Button } from "@/components/ui/button"
 import { getModelInfo } from "@/lib/models"
-import { ArrowUpIcon, StopIcon } from "@phosphor-icons/react"
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { ArrowUpIcon, Brain, Shield, StopIcon } from "@phosphor-icons/react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { PromptSystem } from "../suggestions/prompt-system"
 import { ButtonFileUpload } from "./button-file-upload"
 import { ButtonSearch } from "./button-search"
@@ -60,6 +65,7 @@ export function ChatInput({
   const hasSearchSupport = Boolean(selectModelConfig?.webSearch)
   const isOnlyWhitespace = (text: string) => !/[^\s]/.test(text)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [deepAnalysis, setDeepAnalysis] = useState(false)
 
   const handleSend = useCallback(() => {
     if (isSubmitting) {
@@ -172,61 +178,96 @@ export function ChatInput({
         className="relative order-2 px-2 pb-3 sm:pb-4 md:order-1"
         onClick={() => textareaRef.current?.focus()}
       >
-        <PromptInput
-          className="bg-popover relative z-10 p-0 pt-1 shadow-xs backdrop-blur-xl"
-          maxHeight={200}
-          value={value}
-          onValueChange={onValueChange}
-        >
-          <FileList files={files} onFileRemove={onFileRemove} />
-          <PromptInputTextarea
-            ref={textareaRef}
-            placeholder="Ask Zola"
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
-          />
-          <PromptInputActions className="mt-3 w-full justify-between p-2">
-            <div className="flex gap-2">
-              <ButtonFileUpload
-                onFileUpload={onFileUpload}
-                isUserAuthenticated={isUserAuthenticated}
-                model={selectedModel}
-              />
-              <ModelSelector
-                selectedModelId={selectedModel}
-                setSelectedModelId={onSelectModel}
-                isUserAuthenticated={isUserAuthenticated}
-                className="rounded-full"
-              />
-              {hasSearchSupport ? (
-                <ButtonSearch
-                  isSelected={enableSearch}
-                  onToggle={setEnableSearch}
-                  isAuthenticated={isUserAuthenticated}
+        <div className="ai-input-wrapper">
+          <PromptInput
+            className="bg-popover relative z-10 p-0 pt-1 shadow-xs backdrop-blur-xl"
+            maxHeight={200}
+            value={value}
+            onValueChange={onValueChange}
+          >
+            <FileList files={files} onFileRemove={onFileRemove} />
+            <PromptInputTextarea
+              ref={textareaRef}
+              placeholder="Ask Zola"
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
+            />
+            <PromptInputActions className="mt-3 w-full justify-between p-2">
+              <div className="flex gap-2">
+                <ButtonFileUpload
+                  onFileUpload={onFileUpload}
+                  isUserAuthenticated={isUserAuthenticated}
+                  model={selectedModel}
                 />
-              ) : null}
-            </div>
-            <PromptInputAction
-              tooltip={status === "streaming" ? "Stop" : "Send"}
-            >
-              <Button
-                size="sm"
-                className="size-9 rounded-full transition-all duration-300 ease-out"
-                disabled={!value || isSubmitting || isOnlyWhitespace(value)}
-                type="button"
-                onClick={handleSend}
-                aria-label={status === "streaming" ? "Stop" : "Send message"}
-              >
-                {status === "streaming" ? (
-                  <StopIcon className="size-4" />
-                ) : (
-                  <ArrowUpIcon className="size-4" />
-                )}
-              </Button>
-            </PromptInputAction>
-          </PromptInputActions>
-        </PromptInput>
+                <ModelSelector
+                  selectedModelId={selectedModel}
+                  setSelectedModelId={onSelectModel}
+                  isUserAuthenticated={isUserAuthenticated}
+                  className="rounded-full"
+                />
+                {hasSearchSupport ? (
+                  <ButtonSearch
+                    isSelected={enableSearch}
+                    onToggle={setEnableSearch}
+                    isAuthenticated={isUserAuthenticated}
+                  />
+                ) : null}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant={deepAnalysis ? "default" : "secondary"}
+                      className="border-border dark:bg-secondary h-9 rounded-full border bg-transparent px-3 gap-1.5"
+                      type="button"
+                      onClick={() => setDeepAnalysis((v) => !v)}
+                      aria-label="Deep analysis"
+                      aria-pressed={deepAnalysis}
+                    >
+                      <Brain className="size-4" />
+                      <span className="text-xs font-medium">Deep</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Deep analysis</TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="border-border dark:bg-secondary size-9 rounded-full border bg-transparent"
+                      type="button"
+                      aria-label="Safety check"
+                    >
+                      <Shield className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Safety check</TooltipContent>
+                </Tooltip>
+                <PromptInputAction
+                  tooltip={status === "streaming" ? "Stop" : "Send"}
+                >
+                  <Button
+                    size="sm"
+                    className="size-9 rounded-full transition-all duration-300 ease-out"
+                    disabled={!value || isSubmitting || isOnlyWhitespace(value)}
+                    type="button"
+                    onClick={handleSend}
+                    aria-label={status === "streaming" ? "Stop" : "Send message"}
+                  >
+                    {status === "streaming" ? (
+                      <StopIcon className="size-4" />
+                    ) : (
+                      <ArrowUpIcon className="size-4" />
+                    )}
+                  </Button>
+                </PromptInputAction>
+              </div>
+            </PromptInputActions>
+          </PromptInput>
+        </div>
       </div>
     </div>
   )
