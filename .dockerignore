@@ -107,4 +107,9 @@ jest.config.js
 .prettierrc*
 
 # TypeScript
-*.tsbuildinfo 
+*.tsbuildinfo
+
+# SQLite database (never bake data into the image)
+*.db
+*.db-shm
+*.db-wal
