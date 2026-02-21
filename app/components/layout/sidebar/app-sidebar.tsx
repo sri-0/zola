@@ -23,6 +23,7 @@ import { useUser } from "@/lib/user-store/provider"
 import {
   Books,
   ChatTeardropText,
+  Cpu,
   MagnifyingGlass,
   NotePencilIcon,
 } from "@phosphor-icons/react"
@@ -99,6 +100,16 @@ export function AppSidebar() {
                 >
                   <Books className="size-4" />
                   <span>Prompts</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Models"
+                  onClick={() => router.push("/models")}
+                  className="text-sidebar-foreground/80"
+                >
+                  <Cpu className="size-4" />
+                  <span>Models</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
