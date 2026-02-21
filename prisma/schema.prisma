@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default("local-user")
+  displayName String?
+  createdAt   DateTime @default(now())
+  chats       Chat[]
+  userKeys    UserKey[]
+  preferences UserPreference?
+  projects    Project[]
+}
+
+model Chat {
+  id        String    @id @default(cuid())
+  userId    String    @default("local-user")
+  user      User      @relation(fields: [userId], references: [id])
+  title     String?
+  model     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  pinned    Boolean   @default(false)
+  pinnedAt  DateTime?
+  public    Boolean   @default(false)
+  projectId String?
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  messages  Message[]
+}
+
+model Message {
+  id             Int      @id @default(autoincrement())
+  chatId         String
+  chat           Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  userId         String?
+  role           String
+  content        String?
+  parts          String?
+  model          String?
+  messageGroupId String?
+  createdAt      DateTime @default(now())
+}
+
+model UserKey {
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  provider     String
+  encryptedKey String
+  iv           String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@id([userId, provider])
+}
+
+model UserPreference {
+  userId                  String   @id @default("local-user")
+  user                    User     @relation(fields: [userId], references: [id])
+  layout                  String   @default("sidebar")
+  promptSuggestions       Boolean  @default(true)
+  showToolInvocations     Boolean  @default(true)
+  showConversationPreviews Boolean @default(true)
+  multiModelEnabled       Boolean  @default(false)
+  hiddenModels            String   @default("[]")
+  updatedAt               DateTime @updatedAt
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  userId    String   @default("local-user")
+  user      User     @relation(fields: [userId], references: [id])
+  name      String
+  createdAt DateTime @default(now())
+  chats     Chat[]
+}

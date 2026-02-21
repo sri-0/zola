@@ -1,15 +1,9 @@
 import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
-import { getAllModels } from "@/lib/models"
-import { getProviderForModel } from "@/lib/openproviders/provider-map"
-import type { ProviderWithoutOllama } from "@/lib/user-keys"
-import { Attachment } from "@ai-sdk/ui-utils"
+import { getAIModel } from "@/lib/ai/provider"
+import { prisma } from "@/lib/db"
+import { sanitizeUserInput } from "@/lib/sanitize"
 import { Message as MessageAISDK, streamText, ToolSet } from "ai"
-import {
-  incrementMessageCount,
-  logUserMessage,
-  storeAssistantMessage,
-  validateAndTrackUsage,
-} from "./api"
+import { saveFinalAssistantMessage } from "./db"
 import { createErrorResponse, extractErrorMessage } from "./utils"
 
 export const maxDuration = 60
@@ -31,100 +25,72 @@ export async function POST(req: Request) {
     const {
       messages,
       chatId,
-      userId,
       model,
-      isAuthenticated,
       systemPrompt,
-      enableSearch,
       message_group_id,
       editCutoffTimestamp,
     } = (await req.json()) as ChatRequest
 
-    if (!messages || !chatId || !userId) {
+    if (!messages || !chatId || !model) {
       return new Response(
         JSON.stringify({ error: "Error, missing information" }),
         { status: 400 }
       )
     }
 
-    const supabase = await validateAndTrackUsage({
-      userId,
-      model,
-      isAuthenticated,
-    })
-
-    // Increment message count for successful validation
-    if (supabase) {
-      await incrementMessageCount({ supabase, userId })
-    }
-
     const userMessage = messages[messages.length - 1]
 
     // If editing, delete messages from cutoff BEFORE saving the new user message
-    if (supabase && editCutoffTimestamp) {
+    if (editCutoffTimestamp) {
       try {
-        await supabase
-          .from("messages")
-          .delete()
-          .eq("chat_id", chatId)
-          .gte("created_at", editCutoffTimestamp)
+        await prisma.message.deleteMany({
+          where: {
+            chatId,
+            createdAt: { gte: new Date(editCutoffTimestamp) },
+          },
+        })
       } catch (err) {
         console.error("Failed to delete messages from cutoff:", err)
       }
     }
 
-    if (supabase && userMessage?.role === "user") {
-      await logUserMessage({
-        supabase,
-        userId,
-        chatId,
-        content: userMessage.content,
-        attachments: userMessage.experimental_attachments as Attachment[],
-        model,
-        isAuthenticated,
-        message_group_id,
+    // Log user message
+    if (userMessage?.role === "user") {
+      const content =
+        typeof userMessage.content === "string" ? userMessage.content : ""
+      await prisma.message.create({
+        data: {
+          chatId,
+          role: "user",
+          content: sanitizeUserInput(content),
+          messageGroupId: message_group_id || null,
+        },
       })
     }
 
-    const allModels = await getAllModels()
-    const modelConfig = allModels.find((m) => m.id === model)
-
-    if (!modelConfig || !modelConfig.apiSdk) {
-      throw new Error(`Model ${model} not found`)
-    }
-
+    const aiModel = getAIModel(model)
     const effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT_DEFAULT
 
-    let apiKey: string | undefined
-    if (isAuthenticated && userId) {
-      const { getEffectiveApiKey } = await import("@/lib/user-keys")
-      const provider = getProviderForModel(model)
-      apiKey =
-        (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) ||
-        undefined
-    }
-
     const result = streamText({
-      model: modelConfig.apiSdk(apiKey, { enableSearch }),
+      model: aiModel,
       system: effectiveSystemPrompt,
-      messages: messages,
+      messages,
       tools: {} as ToolSet,
       maxSteps: 10,
       onError: (err: unknown) => {
         console.error("Streaming error occurred:", err)
-        // Don't set streamError anymore - let the AI SDK handle it through the stream
       },
 
       onFinish: async ({ response }) => {
-        if (supabase) {
-          await storeAssistantMessage({
-            supabase,
+        try {
+          await saveFinalAssistantMessage(
             chatId,
-            messages:
-              response.messages as unknown as import("@/app/types/api.types").Message[],
+            response.messages as unknown as import("@/app/types/api.types").Message[],
             message_group_id,
-            model,
-          })
+            model
+          )
+        } catch (err) {
+          console.error("Failed to save assistant messages:", err)
         }
       },
     })

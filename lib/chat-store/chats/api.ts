@@ -1,7 +1,5 @@
 import { readFromIndexedDB, writeToIndexedDB } from "@/lib/chat-store/persist"
 import type { Chat, Chats } from "@/lib/chat-store/types"
-import { createClient } from "@/lib/supabase/client"
-import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { MODEL_DEFAULT } from "../../config"
 import { fetchClient } from "../../fetch"
 import {
@@ -9,83 +7,61 @@ import {
   API_ROUTE_UPDATE_CHAT_MODEL,
 } from "../../routes"
 
-export async function getChatsForUserInDb(userId: string): Promise<Chats[]> {
-  const supabase = createClient()
-  if (!supabase) return []
-
-  const { data, error } = await supabase
-    .from("chats")
-    .select("*")
-    .eq("user_id", userId)
-    .order("pinned", { ascending: false })
-    .order("pinned_at", { ascending: false, nullsFirst: false })
-    .order("updated_at", { ascending: false })
-
-  if (!data || error) {
-    console.error("Failed to fetch chats:", error)
-    return []
+async function apiGet<T>(path: string): Promise<T | null> {
+  try {
+    const res = await fetch(path)
+    if (!res.ok) return null
+    return res.json()
+  } catch {
+    return null
   }
+}
 
-  return data
+export async function getChatsForUserInDb(_userId: string): Promise<Chats[]> {
+  const data = await apiGet<Chats[]>("/api/chats")
+  return data || []
 }
 
 export async function updateChatTitleInDb(id: string, title: string) {
-  const supabase = createClient()
-  if (!supabase) return
-
-  const { error } = await supabase
-    .from("chats")
-    .update({ title, updated_at: new Date().toISOString() })
-    .eq("id", id)
-  if (error) throw error
+  await fetchClient(`/api/chats/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  })
 }
 
 export async function deleteChatInDb(id: string) {
-  const supabase = createClient()
-  if (!supabase) return
-
-  const { error } = await supabase.from("chats").delete().eq("id", id)
-  if (error) throw error
+  await fetchClient("/api/chats", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  })
 }
 
 export async function getAllUserChatsInDb(userId: string): Promise<Chats[]> {
-  const supabase = createClient()
-  if (!supabase) return []
-
-  const { data, error } = await supabase
-    .from("chats")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-
-  if (!data || error) return []
-  return data
+  return getChatsForUserInDb(userId)
 }
 
 export async function createChatInDb(
-  userId: string,
+  _userId: string,
   title: string,
   model: string,
-  systemPrompt: string
+  _systemPrompt: string
 ): Promise<string | null> {
-  const supabase = createClient()
-  if (!supabase) return null
-
-  const { data, error } = await supabase
-    .from("chats")
-    .insert({ user_id: userId, title, model, system_prompt: systemPrompt })
-    .select("id")
-    .single()
-
-  if (error || !data?.id) return null
-  return data.id
+  try {
+    const res = await fetchClient("/api/create-chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, model }),
+    })
+    const data = await res.json()
+    return data?.chat?.id || null
+  } catch {
+    return null
+  }
 }
 
 export async function fetchAndCacheChats(userId: string): Promise<Chats[]> {
-  if (!isSupabaseEnabled) {
-    return await getCachedChats()
-  }
-
   const data = await getChatsForUserInDb(userId)
 
   if (data.length > 0) {
@@ -216,7 +192,7 @@ export async function createNewChat(
   userId: string,
   title?: string,
   model?: string,
-  isAuthenticated?: boolean,
+  _isAuthenticated?: boolean,
   projectId?: string
 ): Promise<Chats> {
   try {
@@ -224,13 +200,11 @@ export async function createNewChat(
       userId: string
       title: string
       model: string
-      isAuthenticated?: boolean
       projectId?: string
     } = {
       userId,
       title: title || "New Chat",
       model: model || MODEL_DEFAULT,
-      isAuthenticated,
     }
 
     if (projectId) {

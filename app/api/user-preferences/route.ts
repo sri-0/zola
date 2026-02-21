@@ -1,65 +1,33 @@
-import { createClient } from "@/lib/supabase/server"
+import { prisma } from "@/lib/db"
+import { LOCAL_USER_ID } from "@/lib/local-user"
 import { NextRequest, NextResponse } from "next/server"
+
+const DEFAULTS = {
+  layout: "sidebar",
+  prompt_suggestions: true,
+  show_tool_invocations: true,
+  show_conversation_previews: true,
+  multi_model_enabled: false,
+  hidden_models: [] as string[],
+}
 
 export async function GET() {
   try {
-    const supabase = await createClient()
+    const prefs = await prisma.userPreference.findUnique({
+      where: { userId: LOCAL_USER_ID },
+    })
 
-    if (!supabase) {
-      return NextResponse.json({
-        layout: "sidebar",
-        prompt_suggestions: true,
-        show_tool_invocations: true,
-        show_conversation_previews: true,
-        multi_model_enabled: false,
-        hidden_models: [],
-      })
-    }
-
-    // Get the current user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    // Get the user's preferences
-    const { data, error } = await supabase
-      .from("user_preferences")
-      .select("*")
-      .eq("user_id", user.id)
-      .single()
-
-    if (error) {
-      // If no preferences exist, return defaults
-      if (error.code === "PGRST116") {
-        return NextResponse.json({
-          layout: "fullscreen",
-          prompt_suggestions: true,
-          show_tool_invocations: true,
-          show_conversation_previews: true,
-          multi_model_enabled: false,
-          hidden_models: [],
-        })
-      }
-
-      console.error("Error fetching user preferences:", error)
-      return NextResponse.json(
-        { error: "Failed to fetch user preferences" },
-        { status: 500 }
-      )
+    if (!prefs) {
+      return NextResponse.json(DEFAULTS)
     }
 
     return NextResponse.json({
-      layout: data.layout,
-      prompt_suggestions: data.prompt_suggestions,
-      show_tool_invocations: data.show_tool_invocations,
-      show_conversation_previews: data.show_conversation_previews,
-      multi_model_enabled: data.multi_model_enabled,
-      hidden_models: data.hidden_models || [],
+      layout: prefs.layout,
+      prompt_suggestions: prefs.promptSuggestions,
+      show_tool_invocations: prefs.showToolInvocations,
+      show_conversation_previews: prefs.showConversationPreviews,
+      multi_model_enabled: prefs.multiModelEnabled,
+      hidden_models: JSON.parse(prefs.hiddenModels || "[]"),
     })
   } catch (error) {
     console.error("Error in user-preferences GET API:", error)
@@ -72,32 +40,6 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = await createClient()
-
-    if (!supabase) {
-      const body = await request.json()
-      return NextResponse.json({
-        success: true,
-        layout: body.layout ?? "sidebar",
-        prompt_suggestions: body.prompt_suggestions ?? true,
-        show_tool_invocations: body.show_tool_invocations ?? true,
-        show_conversation_previews: body.show_conversation_previews ?? true,
-        multi_model_enabled: body.multi_model_enabled ?? false,
-        hidden_models: body.hidden_models ?? [],
-      })
-    }
-
-    // Get the current user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    // Parse the request body
     const body = await request.json()
     const {
       layout,
@@ -108,65 +50,36 @@ export async function PUT(request: NextRequest) {
       hidden_models,
     } = body
 
-    // Validate the data types
-    if (layout && typeof layout !== "string") {
-      return NextResponse.json(
-        { error: "layout must be a string" },
-        { status: 400 }
-      )
-    }
-
-    if (hidden_models && !Array.isArray(hidden_models)) {
-      return NextResponse.json(
-        { error: "hidden_models must be an array" },
-        { status: 400 }
-      )
-    }
-
-    // Prepare update object with only provided fields
-    const updateData: any = {}
+    const updateData: Record<string, unknown> = {}
     if (layout !== undefined) updateData.layout = layout
     if (prompt_suggestions !== undefined)
-      updateData.prompt_suggestions = prompt_suggestions
+      updateData.promptSuggestions = prompt_suggestions
     if (show_tool_invocations !== undefined)
-      updateData.show_tool_invocations = show_tool_invocations
+      updateData.showToolInvocations = show_tool_invocations
     if (show_conversation_previews !== undefined)
-      updateData.show_conversation_previews = show_conversation_previews
+      updateData.showConversationPreviews = show_conversation_previews
     if (multi_model_enabled !== undefined)
-      updateData.multi_model_enabled = multi_model_enabled
-    if (hidden_models !== undefined) updateData.hidden_models = hidden_models
+      updateData.multiModelEnabled = multi_model_enabled
+    if (hidden_models !== undefined)
+      updateData.hiddenModels = JSON.stringify(hidden_models)
 
-    // Try to update first, then insert if doesn't exist
-    const { data, error } = await supabase
-      .from("user_preferences")
-      .upsert(
-        {
-          user_id: user.id,
-          ...updateData,
-        },
-        {
-          onConflict: "user_id",
-        }
-      )
-      .select("*")
-      .single()
-
-    if (error) {
-      console.error("Error updating user preferences:", error)
-      return NextResponse.json(
-        { error: "Failed to update user preferences" },
-        { status: 500 }
-      )
-    }
+    const prefs = await prisma.userPreference.upsert({
+      where: { userId: LOCAL_USER_ID },
+      create: {
+        userId: LOCAL_USER_ID,
+        ...updateData,
+      },
+      update: updateData,
+    })
 
     return NextResponse.json({
       success: true,
-      layout: data.layout,
-      prompt_suggestions: data.prompt_suggestions,
-      show_tool_invocations: data.show_tool_invocations,
-      show_conversation_previews: data.show_conversation_previews,
-      multi_model_enabled: data.multi_model_enabled,
-      hidden_models: data.hidden_models || [],
+      layout: prefs.layout,
+      prompt_suggestions: prefs.promptSuggestions,
+      show_tool_invocations: prefs.showToolInvocations,
+      show_conversation_previews: prefs.showConversationPreviews,
+      multi_model_enabled: prefs.multiModelEnabled,
+      hidden_models: JSON.parse(prefs.hiddenModels || "[]"),
     })
   } catch (error) {
     console.error("Error in user-preferences PUT API:", error)

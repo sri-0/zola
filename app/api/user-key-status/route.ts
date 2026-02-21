@@ -1,36 +1,18 @@
+import { prisma } from "@/lib/db"
+import { LOCAL_USER_ID } from "@/lib/local-user"
 import { PROVIDERS } from "@/lib/providers"
-import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 
 const SUPPORTED_PROVIDERS = PROVIDERS.map((p) => p.id)
 
 export async function GET() {
   try {
-    const supabase = await createClient()
-    if (!supabase) {
-      return NextResponse.json(
-        { error: "Supabase not available" },
-        { status: 500 }
-      )
-    }
+    const keys = await prisma.userKey.findMany({
+      where: { userId: LOCAL_USER_ID },
+      select: { provider: true },
+    })
 
-    const { data: authData } = await supabase.auth.getUser()
-
-    if (!authData?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const { data, error } = await supabase
-      .from("user_keys")
-      .select("provider")
-      .eq("user_id", authData.user.id)
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    // Create status object for all supported providers
-    const userProviders = data?.map((k) => k.provider) || []
+    const userProviders = keys.map((k) => k.provider)
     const providerStatus = SUPPORTED_PROVIDERS.reduce(
       (acc, provider) => {
         acc[provider] = userProviders.includes(provider)

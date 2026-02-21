@@ -1,60 +1,38 @@
-import { validateUserIdentity } from "@/lib/server/api"
-import { checkUsageByModel } from "@/lib/usage"
+import { prisma } from "@/lib/db"
+import { LOCAL_USER_ID } from "@/lib/local-user"
 
 type CreateChatInput = {
-  userId: string
+  userId?: string
   title?: string
   model: string
-  isAuthenticated: boolean
+  isAuthenticated?: boolean
   projectId?: string
 }
 
 export async function createChatInDb({
-  userId,
   title,
   model,
-  isAuthenticated,
   projectId,
 }: CreateChatInput) {
-  const supabase = await validateUserIdentity(userId, isAuthenticated)
-  if (!supabase) {
-    return {
-      id: crypto.randomUUID(),
-      user_id: userId,
-      title,
+  const data = await prisma.chat.create({
+    data: {
+      userId: LOCAL_USER_ID,
+      title: title || "New Chat",
       model,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
+      projectId: projectId || null,
+    },
+  })
+
+  return {
+    id: data.id,
+    user_id: data.userId,
+    title: data.title,
+    model: data.model,
+    created_at: data.createdAt.toISOString(),
+    updated_at: data.updatedAt.toISOString(),
+    pinned: data.pinned,
+    pinned_at: data.pinnedAt?.toISOString() || null,
+    public: data.public,
+    project_id: data.projectId || null,
   }
-
-  await checkUsageByModel(supabase, userId, model, isAuthenticated)
-
-  const insertData: {
-    user_id: string
-    title: string
-    model: string
-    project_id?: string
-  } = {
-    user_id: userId,
-    title: title || "New Chat",
-    model,
-  }
-
-  if (projectId) {
-    insertData.project_id = projectId
-  }
-
-  const { data, error } = await supabase
-    .from("chats")
-    .insert(insertData)
-    .select("*")
-    .single()
-
-  if (error || !data) {
-    console.error("Error creating chat:", error)
-    return null
-  }
-
-  return data
 }

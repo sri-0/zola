@@ -36,38 +36,8 @@ export function useChatOperations({
   setMessages,
 }: UseChatOperationsProps) {
   // Chat utilities
-  const checkLimitsAndNotify = async (uid: string): Promise<boolean> => {
-    try {
-      const rateData = await checkRateLimits(uid, isAuthenticated)
-
-      if (rateData.remaining === 0 && !isAuthenticated) {
-        setHasDialogAuth(true)
-        return false
-      }
-
-      if (rateData.remaining === REMAINING_QUERY_ALERT_THRESHOLD) {
-        toast({
-          title: `Only ${rateData.remaining} quer${
-            rateData.remaining === 1 ? "y" : "ies"
-          } remaining today.`,
-          status: "info",
-        })
-      }
-
-      if (rateData.remainingPro === REMAINING_QUERY_ALERT_THRESHOLD) {
-        toast({
-          title: `Only ${rateData.remainingPro} pro quer${
-            rateData.remainingPro === 1 ? "y" : "ies"
-          } remaining today.`,
-          status: "info",
-        })
-      }
-
-      return true
-    } catch (err) {
-      console.error("Rate limit check failed:", err)
-      return false
-    }
+  const checkLimitsAndNotify = async (_uid: string): Promise<boolean> => {
+    return true
   }
 
   const ensureChatExists = async (userId: string, input: string) => {
