@@ -150,7 +150,7 @@ export default function PromptsPage() {
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              Prompt Library
+              Prompts
             </h1>
             <p className="text-muted-foreground mt-1 text-sm">
               Browse built-in prompts, manage your own, and discover prompts

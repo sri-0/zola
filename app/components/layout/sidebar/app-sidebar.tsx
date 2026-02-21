@@ -93,12 +93,12 @@ export function AppSidebar() {
               )}
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  tooltip="Prompt Library"
+                  tooltip="Prompts"
                   onClick={() => router.push("/prompts")}
                   className="text-sidebar-foreground/80"
                 >
                   <Books className="size-4" />
-                  <span>Prompt Library</span>
+                  <span>Prompts</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
