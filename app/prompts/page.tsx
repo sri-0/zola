@@ -49,11 +49,13 @@ function EmptyState({ label }: { label: string }) {
 function PromptGrid({
   prompts,
   onDelete,
+  onEdited,
   isLoading,
   emptyLabel,
 }: {
   prompts: Prompt[]
   onDelete: ((id: string) => void) | null
+  onEdited: () => void
   isLoading: boolean
   emptyLabel: string
 }) {
@@ -82,6 +84,7 @@ function PromptGrid({
           key={prompt.id}
           prompt={prompt}
           onDelete={onDelete ?? undefined}
+          onEdited={onEdited}
         />
       ))}
     </div>
@@ -199,6 +202,7 @@ export default function PromptsPage() {
             const prompt = prompts.find((p) => p.id === id)
             if (prompt && canDelete(prompt)) deleteMutation.mutate(id)
           }}
+          onEdited={() => queryClient.invalidateQueries({ queryKey: ["prompts"] })}
           isLoading={isLoading}
           emptyLabel={emptyLabel}
         />

@@ -19,7 +19,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Eye, Trash } from "@phosphor-icons/react"
+import { DialogEditPrompt } from "./dialog-edit-prompt"
+import { Eye, PencilSimple, Trash } from "@phosphor-icons/react"
 import { useState } from "react"
 
 const MOCK_USER_ID = "mock-user-123"
@@ -38,6 +39,7 @@ export type Prompt = {
 type PromptCardProps = {
   prompt: Prompt
   onDelete?: (id: string) => void
+  onEdited?: () => void
 }
 
 function formatDate(iso: string | null) {
@@ -49,11 +51,13 @@ function formatDate(iso: string | null) {
   })
 }
 
-export function PromptCard({ prompt, onDelete }: PromptCardProps) {
+export function PromptCard({ prompt, onDelete, onEdited }: PromptCardProps) {
   const [viewOpen, setViewOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
 
   const isOwn = prompt.userId === MOCK_USER_ID
+  const canEdit = isOwn
   const canDelete = isOwn && onDelete
 
   return (
@@ -80,6 +84,17 @@ export function PromptCard({ prompt, onDelete }: PromptCardProps) {
             >
               <Eye className="size-3.5" />
             </Button>
+            {canEdit && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                onClick={() => setEditOpen(true)}
+                aria-label="Edit prompt"
+              >
+                <PencilSimple className="size-3.5" />
+              </Button>
+            )}
             {canDelete && (
               <Button
                 size="icon"
@@ -148,23 +163,46 @@ export function PromptCard({ prompt, onDelete }: PromptCardProps) {
           <div className="prose dark:prose-invert prose-sm max-w-none flex-1 overflow-y-auto">
             <Markdown>{prompt.content}</Markdown>
           </div>
-          {canDelete && (
-            <div className="border-border flex justify-end border-t pt-4">
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  setViewOpen(false)
-                  setDeleteOpen(true)
-                }}
-              >
-                <Trash className="mr-1.5 size-3.5" />
-                Delete
-              </Button>
+          {(canEdit || canDelete) && (
+            <div className="border-border flex justify-end gap-2 border-t pt-4">
+              {canEdit && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setViewOpen(false)
+                    setEditOpen(true)
+                  }}
+                >
+                  <PencilSimple className="mr-1.5 size-3.5" />
+                  Edit
+                </Button>
+              )}
+              {canDelete && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    setViewOpen(false)
+                    setDeleteOpen(true)
+                  }}
+                >
+                  <Trash className="mr-1.5 size-3.5" />
+                  Delete
+                </Button>
+              )}
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Edit dialog */}
+      <DialogEditPrompt
+        prompt={editOpen ? prompt : null}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSaved={() => onEdited?.()}
+      />
 
       {/* Delete confirmation */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
