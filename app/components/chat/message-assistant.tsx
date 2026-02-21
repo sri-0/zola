@@ -4,10 +4,12 @@ import {
   MessageActions,
   MessageContent,
 } from "@/components/prompt-kit/message"
+import { getModelInfo } from "@/lib/models"
+import { PROVIDERS } from "@/lib/providers"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
-import { ArrowClockwise, Check, Copy } from "@phosphor-icons/react"
+import { ArrowClockwise, Check, Copy, ThumbsDown, ThumbsUp } from "@phosphor-icons/react"
 import { useCallback, useRef } from "react"
 import { getSources } from "./get-sources"
 import { QuoteButton } from "./quote-button"
@@ -29,6 +31,7 @@ type MessageAssistantProps = {
   className?: string
   messageId: string
   onQuote?: (text: string, messageId: string) => void
+  model?: string
 }
 
 export function MessageAssistant({
@@ -43,7 +46,12 @@ export function MessageAssistant({
   className,
   messageId,
   onQuote,
+  model,
 }: MessageAssistantProps) {
+  const modelInfo = model ? getModelInfo(model) : undefined
+  const providerIcon = modelInfo
+    ? PROVIDERS.find((p) => p.id === modelInfo.baseProviderId)
+    : undefined
   const { preferences } = useUserPreferences()
   const sources = getSources(parts)
   const toolInvocationParts = parts?.filter(
@@ -133,9 +141,27 @@ export function MessageAssistant({
         {Boolean(isLastStreaming || contentNullOrEmpty) ? null : (
           <MessageActions
             className={cn(
-              "-ml-2 flex gap-0 opacity-0 transition-opacity group-hover:opacity-100"
+              "-ml-2 flex items-center gap-0 opacity-0 transition-opacity group-hover:opacity-100"
             )}
           >
+            <MessageAction tooltip="Good response" side="bottom">
+              <button
+                className="hover:bg-accent/60 text-muted-foreground hover:text-foreground flex size-7.5 items-center justify-center rounded-full bg-transparent transition"
+                aria-label="Good response"
+                type="button"
+              >
+                <ThumbsUp className="size-4" />
+              </button>
+            </MessageAction>
+            <MessageAction tooltip="Bad response" side="bottom">
+              <button
+                className="hover:bg-accent/60 text-muted-foreground hover:text-foreground flex size-7.5 items-center justify-center rounded-full bg-transparent transition"
+                aria-label="Bad response"
+                type="button"
+              >
+                <ThumbsDown className="size-4" />
+              </button>
+            </MessageAction>
             <MessageAction
               tooltip={copied ? "Copied!" : "Copy text"}
               side="bottom"
@@ -169,6 +195,14 @@ export function MessageAssistant({
                 </button>
               </MessageAction>
             ) : null}
+            {modelInfo && (
+              <div className="text-muted-foreground ml-2 flex items-center gap-1.5 pr-1">
+                {providerIcon?.icon && (
+                  <providerIcon.icon className="size-3.5 shrink-0" />
+                )}
+                <span className="text-xs font-medium">{modelInfo.name}</span>
+              </div>
+            )}
           </MessageActions>
         )}
 

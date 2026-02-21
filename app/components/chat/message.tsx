@@ -19,6 +19,7 @@ type MessageProps = {
   onQuote?: (text: string, messageId: string) => void
   messageGroupId?: string | null
   isUserAuthenticated?: boolean
+  model?: string
 }
 
 export function Message({
@@ -36,6 +37,7 @@ export function Message({
   onQuote,
   messageGroupId,
   isUserAuthenticated,
+  model,
 }: MessageProps) {
   const [copied, setCopied] = useState(false)
 
@@ -77,6 +79,7 @@ export function Message({
         className={className}
         messageId={id}
         onQuote={onQuote}
+        model={model}
       >
         {children}
       </MessageAssistant>
