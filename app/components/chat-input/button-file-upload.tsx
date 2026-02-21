@@ -33,7 +33,31 @@ export function ButtonFileUpload({
   model,
 }: ButtonFileUploadProps) {
   if (!isSupabaseEnabled) {
-    return null
+    return (
+      <Popover>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="border-border dark:bg-secondary size-9 rounded-full border bg-transparent"
+                type="button"
+                aria-label="Add files"
+              >
+                <Paperclip className="size-4" />
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Add files</TooltipContent>
+        </Tooltip>
+        <PopoverContent className="p-2">
+          <div className="text-secondary-foreground text-sm">
+            File uploads require Supabase to be configured.
+          </div>
+        </PopoverContent>
+      </Popover>
+    )
   }
 
   const isFileUploadAvailable = getModelInfo(model)?.vision

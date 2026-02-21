@@ -6,10 +6,14 @@ export async function GET() {
     const supabase = await createClient()
 
     if (!supabase) {
-      return NextResponse.json(
-        { error: "Database connection failed" },
-        { status: 500 }
-      )
+      return NextResponse.json({
+        layout: "sidebar",
+        prompt_suggestions: true,
+        show_tool_invocations: true,
+        show_conversation_previews: true,
+        multi_model_enabled: false,
+        hidden_models: [],
+      })
     }
 
     // Get the current user
@@ -71,10 +75,16 @@ export async function PUT(request: NextRequest) {
     const supabase = await createClient()
 
     if (!supabase) {
-      return NextResponse.json(
-        { error: "Database connection failed" },
-        { status: 500 }
-      )
+      const body = await request.json()
+      return NextResponse.json({
+        success: true,
+        layout: body.layout ?? "sidebar",
+        prompt_suggestions: body.prompt_suggestions ?? true,
+        show_tool_invocations: body.show_tool_invocations ?? true,
+        show_conversation_previews: body.show_conversation_previews ?? true,
+        multi_model_enabled: body.multi_model_enabled ?? false,
+        hidden_models: body.hidden_models ?? [],
+      })
     }
 
     // Get the current user
