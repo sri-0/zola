@@ -2,45 +2,22 @@
 """
 test_agent_server.py
 --------------------
-Sophisticated LangGraph agent server demonstrating:
+LangGraph ReAct agent server.
 
-  1. Five tools covering different domains:
-       query_database   — read-only analytics query (no approval needed)
-       write_database   — modifies data (REQUIRES human approval via interrupt)
-       retrieve_documents — semantic document search (no approval)
-       web_search       — simulated web search (no approval)
-       calculate        — math expression evaluator (no approval)
+Graph: planner ↔ executor loop (ReAct style).
+  planner  — LLM with tools; if it returns tool calls → executor
+             else → END (its last message IS the final answer)
+  executor — runs each tool, appends ToolMessages, loops back to planner
 
-  2. LangGraph MemorySaver checkpointer for stateful conversations.
+Special path:
+  If any tool requires approval, route to interrupt_node first.
+  interrupt() pauses the graph; /v1/agent/resume resumes it.
 
-  3. get_stream_writer() for live progress updates emitted from inside nodes.
-     These appear in the SSE stream as custom agent_progress events.
-
-  4. interrupt() in interrupt_node — the graph pauses and a tool_interrupt
-     SSE event is pushed to the client, which shows an approval UI.
-     On resume, the graph continues from the checkpointed state.
-
-  5. Multi-step reasoning graph:
-       planner → [route] → executor → synthesizer → END
-                         → interrupt_node → executor
-
-  6. A /v1/agent/resume endpoint to continue an interrupted graph.
-
-Custom SSE extension events (in addition to standard OpenAI SSE):
-  data: {"agent_progress": {"phase":"...", "message":"...", "step":N, "total":N}}
-  data: {"tool_result": {"toolCallId":"...","toolName":"...","result":{...}}}
-  data: {"tool_interrupt": {"toolCallId":"...","toolName":"...","prompt":"...",
-                             "details":{...},"thread_id":"..."}}
-
-These are consumed by Zola's agent-stream.ts converter.
-
-Config (env vars):
-  LLM_BASE_URL  defaults to https://openrouter.ai/api/v1
-  LLM_API_KEY   required
-  LLM_MODEL     defaults to openai/gpt-4o-mini
-
-Run:
-  LLM_API_KEY=sk-or-... .venv/bin/python test_agent_server.py
+Custom SSE extensions (layered on top of OpenAI SSE format):
+  {"agent_progress": {"phase":"...","message":"..."}}
+  {"tool_result":    {"toolCallId":"...","toolName":"...","result":{...}}}
+  {"tool_interrupt": {"toolCallId":"...","toolName":"...","prompt":"...",
+                      "details":{...},"thread_id":"..."}}
 """
 
 import asyncio
@@ -93,31 +70,41 @@ def query_database(sql: str) -> dict:
     Args:
         sql: SQL-like query string describing what data to fetch
     """
-    # Simulated database with realistic data
     all_data = {
         "products": [
-            {"id": 1, "name": "Widget Pro",  "revenue": 42_000, "units": 840,  "quarter": "Q4 2024", "category": "hardware"},
-            {"id": 2, "name": "Gadget Max",  "revenue": 31_500, "units": 630,  "quarter": "Q4 2024", "category": "hardware"},
-            {"id": 3, "name": "Device Lite", "revenue": 18_750, "units": 1_250, "quarter": "Q4 2024", "category": "software"},
-            {"id": 4, "name": "Cloud Suite", "revenue": 95_000, "units": 190,  "quarter": "Q4 2024", "category": "software"},
-            {"id": 5, "name": "Analytics+",  "revenue": 67_200, "units": 448,  "quarter": "Q4 2024", "category": "software"},
+            {"id": 1, "name": "Widget Pro",  "revenue": 42_000, "units": 840,  "quarter": "Q4 2024"},
+            {"id": 2, "name": "Gadget Max",  "revenue": 31_500, "units": 630,  "quarter": "Q4 2024"},
+            {"id": 3, "name": "Device Lite", "revenue": 18_750, "units": 1_250, "quarter": "Q4 2024"},
+            {"id": 4, "name": "Cloud Suite", "revenue": 95_000, "units": 190,  "quarter": "Q4 2024"},
+            {"id": 5, "name": "Analytics+",  "revenue": 67_200, "units": 448,  "quarter": "Q4 2024"},
+        ],
+        "orders": [
+            {"order_id": 1001, "customer": "Alice Chen",   "amount": 2_400, "date": "2024-10-15"},
+            {"order_id": 1002, "customer": "Bob Martinez", "amount":   149, "date": "2024-10-22"},
+            {"order_id": 1003, "customer": "Carol Smith",  "amount": 1_800, "date": "2024-11-03"},
+            {"order_id": 1004, "customer": "David Lee",    "amount":   320, "date": "2024-11-18"},
+            {"order_id": 1005, "customer": "Eva Patel",    "amount": 4_500, "date": "2024-12-01"},
+            {"order_id": 1006, "customer": "Frank Wu",     "amount":   980, "date": "2024-12-08"},
+            {"order_id": 1007, "customer": "Grace Kim",    "amount": 2_150, "date": "2024-12-14"},
+            {"order_id": 1008, "customer": "Henry James",  "amount":   720, "date": "2024-12-20"},
         ],
         "users": [
-            {"id": 1, "name": "Alice Chen",   "plan": "enterprise", "mrr": 2_400, "joined": "2023-03"},
-            {"id": 2, "name": "Bob Martinez", "plan": "pro",        "mrr":   149, "joined": "2023-09"},
-            {"id": 3, "name": "Carol Smith",  "plan": "enterprise", "mrr": 1_800, "joined": "2024-01"},
+            {"id": 1, "name": "Alice Chen",   "plan": "enterprise", "mrr": 2_400},
+            {"id": 2, "name": "Bob Martinez", "plan": "pro",        "mrr":   149},
+            {"id": 3, "name": "Carol Smith",  "plan": "enterprise", "mrr": 1_800},
         ],
         "metrics": [
-            {"metric": "total_mrr",      "value": 284_000, "change_pct": 12.3},
-            {"metric": "churn_rate",     "value":    2.1,  "change_pct": -0.4},
-            {"metric": "nps_score",      "value":   67,    "change_pct":  3.2},
-            {"metric": "active_users",   "value": 14_820,  "change_pct":  8.7},
+            {"metric": "total_mrr",    "value": 284_000, "change_pct": 12.3},
+            {"metric": "churn_rate",   "value":     2.1, "change_pct": -0.4},
+            {"metric": "nps_score",    "value":      67, "change_pct":  3.2},
+            {"metric": "active_users", "value":  14_820, "change_pct":  8.7},
         ],
     }
-
     sql_lower = sql.lower()
-    if "user" in sql_lower:
-        return {"query": sql, "table": "users", "row_count": 3, "rows": all_data["users"]}
+    if "order" in sql_lower:
+        return {"query": sql, "table": "orders", "row_count": 8, "rows": all_data["orders"]}
+    elif "user" in sql_lower:
+        return {"query": sql, "table": "users",  "row_count": 3, "rows": all_data["users"]}
     elif "metric" in sql_lower or "kpi" in sql_lower or "mrr" in sql_lower:
         return {"query": sql, "table": "metrics", "row_count": 4, "rows": all_data["metrics"]}
     else:
@@ -126,14 +113,13 @@ def query_database(sql: str) -> dict:
 
 @tool
 def write_database(table: str, operation: str, data: dict) -> dict:
-    """Write, update, or delete records in the database. ⚠️ This operation modifies data.
+    """Write, update, or delete records in the database. This operation modifies data.
 
     Args:
-        table: Target table name (e.g. 'products', 'users', 'metrics')
+        table:     Target table name (e.g. 'products', 'users', 'orders')
         operation: One of 'insert', 'update', 'delete'
-        data: The record data for insert/update, or filter criteria for delete
+        data:      The record data for insert/update, or filter criteria for delete
     """
-    # In reality this would modify the DB. Here we simulate success.
     return {
         "success": True,
         "table": table,
@@ -146,108 +132,62 @@ def write_database(table: str, operation: str, data: dict) -> dict:
 
 @tool
 def retrieve_documents(query: str, top_k: int = 3) -> dict:
-    """Search the knowledge base using semantic similarity and return the most relevant documents.
+    """Search the knowledge base using semantic similarity.
 
     Args:
-        query:  Natural language search query
-        top_k:  Number of documents to retrieve (default 3, max 5)
+        query: Natural language search query
+        top_k: Number of documents to retrieve (default 3, max 5)
     """
-    all_docs = [
-        {
-            "id": "doc_001",
-            "title": "Q4 2024 Business Performance Report",
-            "content": "Revenue exceeded targets by 12%. Enterprise segment grew 24% YoY. APAC region launched successfully with 340 new customers. Cloud Suite became the top-selling product.",
-            "score": 0.96,
-            "source": "reports/q4-2024-performance.pdf",
-            "tags": ["revenue", "growth", "enterprise"],
-        },
-        {
-            "id": "doc_002",
-            "title": "Competitive Landscape Analysis",
-            "content": "Market share grew from 19.1% to 23.4%. Three main competitors: Acme Corp (31%), TechCo (18%), NovaSoft (12%). Differentiation through AI-first approach and superior UX.",
-            "score": 0.89,
-            "source": "research/competitive-analysis-2024.pdf",
-            "tags": ["market", "competition", "strategy"],
-        },
-        {
-            "id": "doc_003",
-            "title": "Product Roadmap 2025",
-            "content": "Q1: AI assistant integration. Q2: API-first redesign and GraphQL support. Q3: Mobile apps launch. Q4: Enterprise SSO and advanced analytics dashboard.",
-            "score": 0.83,
-            "source": "product/roadmap-2025.md",
-            "tags": ["roadmap", "features", "AI"],
-        },
-        {
-            "id": "doc_004",
-            "title": "Customer Onboarding Playbook",
-            "content": "Best practices for 60-day onboarding. Key milestones: data import (day 1), team training (day 7), first report (day 14), automation setup (day 30), ROI review (day 60).",
-            "score": 0.78,
-            "source": "success/onboarding-playbook.pdf",
-            "tags": ["onboarding", "customers", "success"],
-        },
-        {
-            "id": "doc_005",
-            "title": "Security & Compliance Framework",
-            "content": "SOC 2 Type II certified. GDPR and CCPA compliant. Data encrypted at rest (AES-256) and in transit (TLS 1.3). Annual penetration testing. ISO 27001 certification in progress.",
-            "score": 0.71,
-            "source": "legal/security-compliance.pdf",
-            "tags": ["security", "compliance", "GDPR"],
-        },
+    docs = [
+        {"id": "doc_001", "title": "Q4 2024 Business Performance Report",
+         "content": "Revenue exceeded targets by 12%. Enterprise segment grew 24% YoY. Cloud Suite became the top-selling product.",
+         "score": 0.96, "source": "reports/q4-2024-performance.pdf"},
+        {"id": "doc_002", "title": "Competitive Landscape Analysis",
+         "content": "Market share grew from 19.1% to 23.4%. Three main competitors: Acme Corp (31%), TechCo (18%), NovaSoft (12%).",
+         "score": 0.89, "source": "research/competitive-analysis-2024.pdf"},
+        {"id": "doc_003", "title": "Product Roadmap 2025",
+         "content": "Q1: AI assistant integration. Q2: API-first redesign. Q3: Mobile apps. Q4: Enterprise SSO.",
+         "score": 0.83, "source": "product/roadmap-2025.md"},
     ]
-    top_k = min(int(top_k), 5)
-    return {"query": query, "total_retrieved": top_k, "documents": all_docs[:top_k]}
+    return {"query": query, "total_retrieved": min(int(top_k), 5), "documents": docs[:top_k]}
 
 
 @tool
 def web_search(query: str, num_results: int = 4) -> dict:
-    """Search the web for current information, news, and external data.
+    """Search the web for current information and news.
 
     Args:
         query:       Search query string
         num_results: Number of results to return (default 4)
     """
-    # Simulated web search results
     results = [
-        {
-            "url": "https://techcrunch.com/2025/02/ai-market-growth",
-            "title": "AI Market Expected to Reach $1.8T by 2030",
-            "snippet": f"Analysts project the global AI market will grow at 38% CAGR. Enterprise adoption is the primary driver, with SaaS and analytics platforms leading deployment.",
-            "published": "2025-02-18",
-        },
-        {
-            "url": "https://gartner.com/insights/2025-tech-predictions",
-            "title": "Gartner's Top 10 Tech Trends for 2025",
-            "snippet": "AI agents, autonomous systems, and edge computing top the list. 80% of enterprises will have deployed at least one AI agent by end of 2025.",
-            "published": "2025-01-15",
-        },
-        {
-            "url": "https://bloomberg.com/news/saas-consolidation-2025",
-            "title": "SaaS Consolidation Wave Accelerates",
-            "snippet": f"Related to '{query}': Major SaaS players are acquiring AI startups to strengthen their offering. M&A activity up 67% compared to 2024.",
-            "published": "2025-02-10",
-        },
-        {
-            "url": "https://hbr.org/2025/strategy/data-driven-decisions",
-            "title": "How Data-Driven Companies Outperform Peers",
-            "snippet": "Companies that use analytics tools consistently outperform peers by 2.3x on key financial metrics. Real-time data access is the biggest differentiator.",
-            "published": "2025-02-05",
-        },
+        {"url": "https://techcrunch.com/2025/02/ai-market-growth",
+         "title": "AI Market Expected to Reach $1.8T by 2030",
+         "snippet": "Analysts project 38% CAGR. Enterprise adoption is the primary driver.",
+         "published": "2025-02-18"},
+        {"url": "https://gartner.com/insights/2025-tech-predictions",
+         "title": "Gartner's Top 10 Tech Trends for 2025",
+         "snippet": "AI agents and autonomous systems top the list. 80% of enterprises will deploy at least one AI agent by end of 2025.",
+         "published": "2025-01-15"},
+        {"url": "https://bloomberg.com/news/saas-consolidation-2025",
+         "title": "SaaS Consolidation Wave Accelerates",
+         "snippet": f"Related to '{query}': Major SaaS players acquiring AI startups. M&A activity up 67%.",
+         "published": "2025-02-10"},
     ]
-    return {"query": query, "num_results": num_results, "results": results[:num_results]}
+    return {"query": query, "results": results[:num_results]}
 
 
 @tool
 def calculate(expression: str) -> dict:
-    """Evaluate mathematical expressions and perform calculations.
+    """Evaluate a mathematical expression.
 
     Args:
-        expression: A mathematical expression (e.g., '42000 * 1.12', 'sqrt(2500)', '(95000 + 67200) / 2')
+        expression: A math expression e.g. '50000 / 8', 'sqrt(2500)', '(95000 + 67200) / 2'
     """
     try:
-        # Safe eval with only math functions
-        allowed_names = {k: v for k, v in math.__dict__.items() if not k.startswith("_")}
-        allowed_names.update({"abs": abs, "round": round, "min": min, "max": max, "sum": sum})
-        result = eval(expression, {"__builtins__": {}}, allowed_names)  # noqa: S307
+        allowed = {k: v for k, v in math.__dict__.items() if not k.startswith("_")}
+        allowed.update({"abs": abs, "round": round, "min": min, "max": max, "sum": sum})
+        result = eval(expression, {"__builtins__": {}}, allowed)  # noqa: S307
         return {
             "expression": expression,
             "result": result,
@@ -257,29 +197,22 @@ def calculate(expression: str) -> dict:
         return {"expression": expression, "error": str(e)}
 
 
-# ---------------------------------------------------------------------------
-# Tool registry
-# ---------------------------------------------------------------------------
-
-TOOLS = [query_database, write_database, retrieve_documents, web_search, calculate]
-TOOLS_BY_NAME = {t.name: t for t in TOOLS}
+TOOLS            = [query_database, write_database, retrieve_documents, web_search, calculate]
+TOOLS_BY_NAME    = {t.name: t for t in TOOLS}
 APPROVAL_REQUIRED_TOOLS = {"write_database"}
 
 _llm_with_tools = _llm.bind_tools(TOOLS)
 
 
 # ---------------------------------------------------------------------------
-# Graph state
+# Graph state — minimal; messages list carries everything
 # ---------------------------------------------------------------------------
 
 class AgentState(TypedDict):
-    messages:    list       # LangChain message objects from user
-    tool_calls:  list       # [{id, name, args}] chosen by planner
-    tool_results: list      # [{id, name, result}] from executor
-    final_text:  str        # Final response text
-    _llm_content: str       # Direct LLM content for no-tool path
-    approvals:   dict       # {tool_call_id: "approved"|"denied"|"skipped"}
-    _thread_id:  str        # Stored so interrupt payload includes it
+    messages:    list   # Full LangChain message history (grows each round)
+    approvals:   dict   # {tool_call_id: "approved"|"denied"|"skipped"}
+    _thread_id:  str
+    _step:       int    # Safety limit on ReAct iterations
 
 
 # ---------------------------------------------------------------------------
@@ -287,43 +220,38 @@ class AgentState(TypedDict):
 # ---------------------------------------------------------------------------
 
 def planner_node(state: AgentState) -> AgentState:
-    """Call the LLM with all tools bound. Streaming handled by astream_events."""
+    """LLM decides next action.  If it returns tool_calls → executor.
+    If it returns plain text → route_after_planner sends us to END."""
     response = _llm_with_tools.invoke(state["messages"])
-    tool_calls = [
-        {"id": tc["id"], "name": tc["name"], "args": tc["args"]}
-        for tc in (response.tool_calls or [])
-    ]
-    return {**state, "tool_calls": tool_calls, "_llm_content": response.content}
+    return {
+        **state,
+        "messages": state["messages"] + [response],
+        "_step":    state.get("_step", 0) + 1,
+    }
 
 
 def route_after_planner(state: AgentState) -> str:
-    """Decide next node based on planner output."""
-    if not state.get("tool_calls"):
-        return "end"  # LLM answered directly; graph stops after planner
-    needs_approval = any(
-        tc["name"] in APPROVAL_REQUIRED_TOOLS for tc in state["tool_calls"]
-    )
+    last = state["messages"][-1]
+    tool_calls = getattr(last, "tool_calls", None) or []
+    if not tool_calls or state.get("_step", 0) >= 6:
+        return "end"   # Final answer or safety limit reached
+    needs_approval = any(tc["name"] in APPROVAL_REQUIRED_TOOLS for tc in tool_calls)
     return "interrupt" if needs_approval else "executor"
 
 
 def interrupt_node(state: AgentState) -> AgentState:
-    """Human-in-the-loop gate: pauses graph and requests user approval.
-
-    On first pass: calls interrupt() → graph suspends → client gets tool_interrupt event.
-    On resume:     interrupt() returns the user's action → stores in approvals.
-    """
-    approval_calls = [
-        tc for tc in state["tool_calls"] if tc["name"] in APPROVAL_REQUIRED_TOOLS
-    ]
-    if not approval_calls:
+    """Pause graph and ask the user for approval before a protected tool runs."""
+    last  = state["messages"][-1]
+    calls = [tc for tc in (getattr(last, "tool_calls", None) or [])
+             if tc["name"] in APPROVAL_REQUIRED_TOOLS]
+    if not calls:
         return state
 
-    call = approval_calls[0]
-
-    interrupt_payload = {
+    call = calls[0]
+    payload = {
         "toolCallId": call["id"],
         "toolName":   call["name"],
-        "prompt":     (
+        "prompt": (
             f"The agent wants to perform a **{call['args'].get('operation', 'write')}** "
             f"operation on the **{call['args'].get('table', 'database')}** table. "
             "Do you want to allow this?"
@@ -336,83 +264,54 @@ def interrupt_node(state: AgentState) -> AgentState:
         "thread_id": state.get("_thread_id", ""),
     }
 
-    # ── SUSPEND ── graph pauses here; resumes when client calls /v1/agent/resume
-    action: str = interrupt(interrupt_payload)
+    # Graph suspends here; resumes when client calls /v1/agent/resume
+    action: str = interrupt(payload)
 
-    # ── RESUMED ── action is "approved", "denied", or "skipped"
     approvals = dict(state.get("approvals") or {})
     approvals[call["id"]] = action
     return {**state, "approvals": approvals}
 
 
 async def executor_node(state: AgentState) -> AgentState:
-    """Execute each planned tool call."""
-    results = []
-    approvals = state.get("approvals") or {}
+    """Execute all tool calls from the latest AIMessage, append ToolMessages."""
+    last      = state["messages"][-1]
+    tool_calls = getattr(last, "tool_calls", None) or []
+    approvals  = state.get("approvals") or {}
+    tool_msgs: list = []
 
-    for call in state["tool_calls"]:
-        tool_name = call["name"]
-        call_id   = call["id"]
+    for tc in tool_calls:
+        name    = tc["name"]
+        call_id = tc["id"]
 
-        # Check approval for protected tools
-        if tool_name in APPROVAL_REQUIRED_TOOLS:
+        if name in APPROVAL_REQUIRED_TOOLS:
             action = approvals.get(call_id, "denied")
             if action != "approved":
-                results.append({
-                    "id": call_id, "name": tool_name,
-                    "result": {"status": f"Operation {action} by user", "success": False},
-                })
+                result = {"status": f"Operation {action} by user", "success": False}
+                tool_msgs.append(ToolMessage(
+                    content=json.dumps(result), tool_call_id=call_id, name=name))
                 continue
 
-        fn = TOOLS_BY_NAME.get(tool_name)
+        fn = TOOLS_BY_NAME.get(name)
         if fn:
             try:
-                result = fn.invoke(call["args"])
+                result = fn.invoke(tc["args"])
             except Exception as exc:
                 result = {"error": str(exc)}
         else:
-            result = {"error": f"Unknown tool: {tool_name}"}
+            result = {"error": f"Unknown tool: {name}"}
 
-        results.append({"id": call_id, "name": tool_name, "result": result})
-        await asyncio.sleep(0.4)  # Small delay so the "Running" badge is visible
-
-    return {**state, "tool_results": results}
-
-
-def synthesizer_node(state: AgentState) -> AgentState:
-    """Call the LLM to produce a natural language response from the tool results.
-
-    The streaming tokens appear via on_chat_model_stream (node='synthesizer').
-    """
-    if not state.get("tool_results"):
-        # No tools ran — the planner already produced the answer
-        return {**state, "final_text": state.get("_llm_content", "")}
-
-    # Build a message history that includes the tool results
-    messages = list(state["messages"])
-
-    # Add the AI message that contained tool calls
-    lc_tool_calls = [
-        {"id": tc["id"], "name": tc["name"], "args": tc["args"]}
-        for tc in state["tool_calls"]
-    ]
-    messages.append(AIMessage(content="", tool_calls=lc_tool_calls))
-
-    # Add each tool result
-    for tr in state["tool_results"]:
-        messages.append(ToolMessage(
-            content=json.dumps(tr["result"]),
-            tool_call_id=tr["id"],
-            name=tr["name"],
+        tool_msgs.append(ToolMessage(
+            content=json.dumps(result) if isinstance(result, dict) else str(result),
+            tool_call_id=call_id,
+            name=name,
         ))
+        await asyncio.sleep(0.3)  # Slight delay so Running badge is briefly visible
 
-    # Let the LLM synthesize a natural, markdown-formatted response
-    response = _llm.invoke(messages)
-    return {**state, "final_text": response.content}
+    return {**state, "messages": state["messages"] + tool_msgs}
 
 
 # ---------------------------------------------------------------------------
-# Build graph with MemorySaver checkpointer
+# Build graph
 # ---------------------------------------------------------------------------
 
 _memory = MemorySaver()
@@ -424,7 +323,6 @@ def _build_graph():
     wf.add_node("planner",       planner_node)
     wf.add_node("interrupt_node", interrupt_node)
     wf.add_node("executor",      executor_node)
-    wf.add_node("synthesizer",   synthesizer_node)
 
     wf.set_entry_point("planner")
 
@@ -434,8 +332,7 @@ def _build_graph():
         {"end": END, "interrupt": "interrupt_node", "executor": "executor"},
     )
     wf.add_edge("interrupt_node", "executor")
-    wf.add_edge("executor",       "synthesizer")
-    wf.add_edge("synthesizer",    END)
+    wf.add_edge("executor",       "planner")   # ← ReAct loop back
 
     return wf.compile(checkpointer=_memory)
 
@@ -460,57 +357,46 @@ def openai_chunk(request_id: str, delta: dict, finish_reason: str | None = None)
 
 
 # ---------------------------------------------------------------------------
-# Shared event processing
+# Shared event processing (handles N ReAct rounds)
 # ---------------------------------------------------------------------------
 
 async def _process_events(
     event_stream: AsyncGenerator,
     chunk_fn,
-    planner_id_by_tool: dict[str, str],
+    pending_tool_call_ids: list,  # mutable list — caller owns it
 ) -> AsyncGenerator[str, None]:
     """
-    Async generator that processes astream_events and yields SSE strings.
+    Processes astream_events for a ReAct loop and yields SSE strings.
 
-    Progress events are inferred from standard LangGraph events:
-      on_chain_start (planner)    → "planning" phase
-      on_tool_start               → "executing" phase per tool
-      on_chat_model_start (syn.)  → "synthesizing" phase
+    Progress is inferred from standard LangGraph events:
+      on_chat_model_start (planner) → "planning" phase (fires every round)
+      on_tool_start                 → "executing" phase per tool
     """
     had_natural_finish = False
-    tool_count: dict[str, int] = {}   # track how many tools have started
 
     async for event in event_stream:
         kind = event.get("event", "")
         name = event.get("name", "")
         node = event.get("metadata", {}).get("langgraph_node", "")
 
-        # ── Infer progress from standard events ───────────────────────────────
-        # on_chat_model_start fires once per LLM call inside a node (more precise)
+        # ── Progress inferred from standard events ─────────────────────────
         if kind == "on_chat_model_start" and node == "planner":
             yield sse({"agent_progress": {
-                "phase": "planning", "message": "Analyzing your request and selecting tools...",
+                "phase": "planning", "message": "Analyzing...",
             }})
             continue
 
         if kind == "on_tool_start":
-            tool_count[name] = tool_count.get(name, 0) + 1
             yield sse({"agent_progress": {
                 "phase": "executing", "message": f"Running {name}...",
             }})
             continue
 
-        if kind == "on_chain_start" and node == "synthesizer":
-            yield sse({"agent_progress": {
-                "phase": "synthesizing", "message": "Synthesizing response from tool results...",
-            }})
-            continue
-
-        # ── Planner LLM: live token / tool-call streaming ─────────────────────
+        # ── Planner LLM: live token / tool-call streaming ──────────────────
         if kind == "on_chat_model_stream" and node == "planner":
             ai_chunk = event["data"]["chunk"]
             delta: dict = {}
 
-            # Reasoning tokens (deepseek-r1, o1, etc.)
             reasoning = (
                 ai_chunk.additional_kwargs.get("reasoning_content")
                 or ai_chunk.additional_kwargs.get("reasoning")
@@ -518,18 +404,16 @@ async def _process_events(
             if reasoning:
                 delta["reasoning_content"] = reasoning
 
-            # Text content — stream when LLM answers directly (no tool calls)
             if ai_chunk.content and not ai_chunk.tool_call_chunks:
                 delta["content"] = ai_chunk.content
 
-            # Tool-call argument chunks
             if ai_chunk.tool_call_chunks:
                 tc_deltas = []
                 for tcc in ai_chunk.tool_call_chunks:
                     td: dict = {"index": tcc.get("index", 0)}
                     if tcc.get("id"):
-                        td["id"]   = tcc["id"]
-                        td["type"] = "function"
+                        td["id"]       = tcc["id"]
+                        td["type"]     = "function"
                         td["function"] = {"name": tcc.get("name", ""), "arguments": ""}
                     if tcc.get("args"):
                         td.setdefault("function", {})["arguments"] = tcc["args"]
@@ -540,29 +424,23 @@ async def _process_events(
             if delta:
                 yield chunk_fn(delta)
 
-        # ── Planner LLM: finished ─────────────────────────────────────────────
+        # ── Planner LLM: finished ──────────────────────────────────────────
         elif kind == "on_chat_model_end" and node == "planner":
             output = event["data"]["output"]
             if output.tool_calls:
-                planner_id_by_tool.update({tc["name"]: tc["id"] for tc in output.tool_calls})
+                # Queue tool call IDs so on_tool_end can correlate (FIFO)
+                pending_tool_call_ids.extend(tc["id"] for tc in output.tool_calls)
                 yield chunk_fn({}, finish_reason="tool_calls")
             else:
-                # Direct answer — mark finish; stop emitted after loop
+                # No more tool calls — planner produced the final answer
                 had_natural_finish = True
 
-        # ── Synthesizer LLM: stream the final answer ──────────────────────────
-        elif kind == "on_chat_model_stream" and node == "synthesizer":
-            ai_chunk = event["data"]["chunk"]
-            if ai_chunk.content and not ai_chunk.tool_call_chunks:
-                yield chunk_fn({"content": ai_chunk.content})
-
-        # ── Synthesizer LLM: finished ─────────────────────────────────────────
-        elif kind == "on_chat_model_end" and node == "synthesizer":
-            had_natural_finish = True
-
-        # ── Tool completed ────────────────────────────────────────────────────
+        # ── Tool completed ─────────────────────────────────────────────────
         elif kind == "on_tool_end":
-            tc_id = planner_id_by_tool.get(name, event.get("run_id", uuid.uuid4().hex))
+            # Match to queued tool call ID (sequential execution → FIFO is correct)
+            tc_id = (pending_tool_call_ids.pop(0)
+                     if pending_tool_call_ids
+                     else event.get("run_id", uuid.uuid4().hex))
 
             raw = event["data"].get("output")
             if isinstance(raw, ToolMessage):
@@ -575,11 +453,9 @@ async def _process_events(
             else:
                 result = str(raw) if raw is not None else None
 
-            await asyncio.sleep(0.5)  # Let "Running" badge be visible briefly
+            await asyncio.sleep(0.4)  # Brief pause so Running badge is visible
             yield sse({"tool_result": {"toolCallId": tc_id, "toolName": name, "result": result}})
 
-    # Signal whether it ended naturally (vs interrupt)
-    # We abuse the return mechanism of generators — callers must drain fully
     if had_natural_finish:
         yield "__HAD_NATURAL_FINISH__"
 
@@ -607,34 +483,30 @@ async def run_agent_stream(
             lc_messages.append(AIMessage(content=content))
 
     initial_state: AgentState = {
-        "messages":    lc_messages,
-        "tool_calls":  [],
-        "tool_results": [],
-        "final_text":  "",
-        "_llm_content": "",
-        "approvals":   {},
-        "_thread_id":  thread_id,
+        "messages":   lc_messages,
+        "approvals":  {},
+        "_thread_id": thread_id,
+        "_step":      0,
     }
 
-    thread_config = {"configurable": {"thread_id": thread_id}}
-    planner_id_by_tool: dict[str, str] = {}
-    had_natural_finish = False
+    thread_config            = {"configurable": {"thread_id": thread_id}}
+    pending_tool_call_ids: list[str] = []
+    had_natural_finish       = False
 
     event_gen = GRAPH.astream_events(initial_state, config=thread_config, version="v2")
 
-    async for part in _process_events(event_gen, chunk, planner_id_by_tool):
+    async for part in _process_events(event_gen, chunk, pending_tool_call_ids):
         if part == "__HAD_NATURAL_FINISH__":
             had_natural_finish = True
         else:
             yield part
 
-    # ── Check for pending interrupt (graph suspended) ─────────────────────────
+    # Check for a pending interrupt (graph suspended waiting for user)
     if not had_natural_finish:
         try:
             state = await GRAPH.aget_state(thread_config)
             if state.interrupts:
-                interrupt_value = state.interrupts[0].value
-                yield sse({"tool_interrupt": interrupt_value})
+                yield sse({"tool_interrupt": state.interrupts[0].value})
         except Exception as exc:
             print(f"[agent] Failed to read interrupt state: {exc}")
 
@@ -657,43 +529,51 @@ async def run_resume_stream(
 
     thread_config = {"configurable": {"thread_id": thread_id}}
 
-    # Read the pending state to recover tool call IDs (needed to correlate tool_end events)
-    planner_id_by_tool: dict[str, str] = {}
+    # Recover pending tool calls so we can emit synthetic "Running" cards in the UI
     pending_tool_calls: list[dict] = []
     try:
-        state = await GRAPH.aget_state(thread_config)
-        tc_list = state.values.get("tool_calls", [])
-        planner_id_by_tool = {tc["name"]: tc["id"] for tc in tc_list}
-        pending_tool_calls  = [tc for tc in tc_list if tc["name"] in APPROVAL_REQUIRED_TOOLS]
+        state   = await GRAPH.aget_state(thread_config)
+        tc_list = getattr(state.values.get("messages", [])[-1], "tool_calls", []) or []
+        pending_tool_calls = [tc for tc in tc_list if tc["name"] in APPROVAL_REQUIRED_TOOLS]
     except Exception as exc:
         print(f"[resume] Failed to read state: {exc}")
 
-    # Emit synthetic tool-call announcement so the UI shows "Running → Completed" cards
-    if action == "approved" and pending_tool_calls:
-        tc_deltas = []
-        for i, tc in enumerate(pending_tool_calls):
-            tc_deltas.append({
+    # Synthetic tool-call announcement so UI shows Running → result for any action
+    if pending_tool_calls:
+        tc_deltas = [
+            {
                 "index":    i,
                 "id":       tc["id"],
                 "type":     "function",
                 "function": {"name": tc["name"], "arguments": json.dumps(tc["args"])},
-            })
+            }
+            for i, tc in enumerate(pending_tool_calls)
+        ]
         yield chunk({"tool_calls": tc_deltas})
         yield chunk({}, finish_reason="tool_calls")
 
+    # Pre-seed the FIFO queue with the IDs from the synthetic announcement so that
+    # on_tool_end events (which lack the original call ID) are matched correctly.
+    pending_tool_call_ids: list[str] = [tc["id"] for tc in pending_tool_calls]
     had_natural_finish = False
 
     event_gen = GRAPH.astream_events(Command(resume=action), config=thread_config, version="v2")
 
-    async for part in _process_events(event_gen, chunk, planner_id_by_tool):
+    async for part in _process_events(event_gen, chunk, pending_tool_call_ids):
         if part == "__HAD_NATURAL_FINISH__":
             had_natural_finish = True
         else:
             yield part
 
+    # After a resume the graph may hit ANOTHER interrupt (e.g. second write_database call).
+    # Check for a new pending interrupt, same as run_agent_stream does.
     if not had_natural_finish:
-        # Unexpected — guard against another interrupt loop in demo
-        pass
+        try:
+            state = await GRAPH.aget_state(thread_config)
+            if state.interrupts:
+                yield sse({"tool_interrupt": state.interrupts[0].value})
+        except Exception as exc:
+            print(f"[resume] Failed to read interrupt state: {exc}")
 
     yield chunk({}, finish_reason="stop")
     yield "data: [DONE]\n\n"
@@ -715,10 +595,9 @@ app.add_middleware(
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    body = await request.json()
-    messages   = body.get("messages", [])
-    # thread_id is passed by Zola's route.ts so interrupts can be resumed
-    thread_id  = body.get("thread_id", f"anon-{uuid.uuid4().hex[:12]}")
+    body      = await request.json()
+    messages  = body.get("messages", [])
+    thread_id = body.get("thread_id", f"anon-{uuid.uuid4().hex[:12]}")
 
     return StreamingResponse(
         run_agent_stream(messages, thread_id),
@@ -731,7 +610,7 @@ async def chat_completions(request: Request):
 async def agent_resume(request: Request):
     body      = await request.json()
     thread_id = body.get("thread_id", "")
-    action    = body.get("action", "denied")  # "approved" | "denied" | "skipped"
+    action    = body.get("action", "denied")
 
     if not thread_id:
         return {"error": "thread_id is required"}, 400
@@ -752,7 +631,7 @@ async def list_models():
             "object":      "model",
             "created":     int(time.time()),
             "owned_by":    "local",
-            "description": f"LangGraph multi-tool agent via {_LLM_MODEL}",
+            "description": f"LangGraph ReAct agent via {_LLM_MODEL}",
         }],
     }
 

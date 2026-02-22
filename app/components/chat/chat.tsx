@@ -193,12 +193,14 @@ export function Chat() {
   // Interrupt card state — held in component state so it survives message reconciliation
   // (message.annotations gets wiped when onFinish calls syncRecentMessages from DB).
   const [pendingInterrupt, setPendingInterrupt] = useState<ToolInterruptAnnotation | null>(null)
-  const handledThreadIdRef = useRef<string | null>(null)
+  // Track handled toolCallIds (unique per interrupt) to prevent re-showing the same one.
+  // thread_id == chatId so cannot be used for dedup across multiple interrupts in one chat.
+  const handledToolCallIdsRef = useRef<Set<string>>(new Set())
 
   // Clear interrupt when navigating to a different chat
   useEffect(() => {
     setPendingInterrupt(null)
-    handledThreadIdRef.current = null
+    handledToolCallIdsRef.current = new Set()
   }, [chatId])
 
   // When the stream ends, check the server for a pending tool interrupt.
@@ -212,8 +214,8 @@ export function Chat() {
         const d = data as Record<string, unknown> | null
         if (
           d?.type === "tool_interrupt" &&
-          typeof d.thread_id === "string" &&
-          d.thread_id !== handledThreadIdRef.current
+          typeof d.toolCallId === "string" &&
+          !handledToolCallIdsRef.current.has(d.toolCallId)
         ) {
           setPendingInterrupt(d as unknown as ToolInterruptAnnotation)
         }
@@ -230,8 +232,10 @@ export function Chat() {
       const uid = await import("@/lib/api").then((m) => m.getOrCreateGuestUserId(user))
       if (!uid || !chatId) return
 
-      // Clear the interrupt card immediately and prevent re-triggering for this thread
-      handledThreadIdRef.current = threadId
+      // Mark this specific interrupt as handled so it won't re-appear
+      if (pendingInterrupt?.toolCallId) {
+        handledToolCallIdsRef.current.add(pendingInterrupt.toolCallId)
+      }
       setPendingInterrupt(null)
 
       const currentChatId = chatId
@@ -249,7 +253,7 @@ export function Chat() {
         }
       )
     },
-    [append, chatId, user, selectedModel, isAuthenticated, systemPrompt, enableSearch]
+    [append, chatId, user, selectedModel, isAuthenticated, systemPrompt, enableSearch, pendingInterrupt]
   )
 
   // Handle redirect for invalid chatId - only redirect if we're certain the chat doesn't exist

@@ -52,35 +52,36 @@ export function Conversation({
             // Filter out internal RESUME: signals sent to trigger agent resume
             .filter((m) => !(m.role === "user" && typeof m.content === "string" && m.content.startsWith("RESUME:")))
             .map((message, index, arr) => {
-            const isLast =
-              index === arr.length - 1 && status !== "submitted"
-            const hasScrollAnchor =
-              isLast && messages.length > initialMessageCount.current
+              const isLast =
+                index === arr.length - 1 && status !== "submitted"
+              const hasScrollAnchor =
+                isLast && messages.length > initialMessageCount.current
 
-            return (
-              <Message
-                key={message.id}
-                id={message.id}
-                variant={message.role}
-                attachments={message.experimental_attachments}
-                isLast={isLast}
-                onDelete={onDelete}
-                onEdit={onEdit}
-                onReload={onReload}
-                hasScrollAnchor={hasScrollAnchor}
-                parts={message.parts}
-                status={status}
-                onQuote={onQuote}
-                messageGroupId={
-                  (message as ExtendedMessageAISDK).message_group_id ?? null
-                }
-                model={(message as ExtendedMessageAISDK).model}
-                isUserAuthenticated={isUserAuthenticated}
-              >
-                {message.content}
-              </Message>
-            )
-          })}
+              return (
+                <Message
+                  key={message.id}
+                  id={message.id}
+                  variant={message.role}
+                  attachments={message.experimental_attachments}
+                  isLast={isLast}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                  onReload={onReload}
+                  hasScrollAnchor={hasScrollAnchor}
+                  parts={message.parts}
+                  annotations={message.annotations}
+                  status={status}
+                  onQuote={onQuote}
+                  messageGroupId={
+                    (message as ExtendedMessageAISDK).message_group_id ?? null
+                  }
+                  model={(message as ExtendedMessageAISDK).model}
+                  isUserAuthenticated={isUserAuthenticated}
+                >
+                  {message.content}
+                </Message>
+              )
+            })}
           {status === "submitted" &&
             messages.length > 0 &&
             messages[messages.length - 1].role === "user" && (

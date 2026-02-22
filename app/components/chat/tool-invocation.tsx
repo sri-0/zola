@@ -9,6 +9,7 @@ import {
   DatabaseIcon,
   FileSearchIcon,
   GlobeIcon,
+  HourglassIcon,
   ImagesIcon,
   LinkIcon,
   MagnifyingGlassIcon,
@@ -37,6 +38,7 @@ interface ToolInvocationProps {
   toolInvocations: ToolInvocationUIPart[]
   className?: string
   defaultOpen?: boolean
+  interruptedToolCallIds?: Set<string>
 }
 
 const TRANSITION = {
@@ -48,6 +50,7 @@ const TRANSITION = {
 export function ToolInvocation({
   toolInvocations,
   defaultOpen = false,
+  interruptedToolCallIds,
 }: ToolInvocationProps) {
   const toolInvocationsData = Array.isArray(toolInvocations)
     ? toolInvocations
@@ -78,6 +81,7 @@ export function ToolInvocation({
             key={toolId}
             toolInvocations={toolInvocationsForId}
             defaultOpen={defaultOpen}
+            interruptedToolCallIds={interruptedToolCallIds}
           />
         )
       })}
@@ -89,12 +93,14 @@ type SingleToolViewProps = {
   toolInvocations: ToolInvocationUIPart[]
   defaultOpen?: boolean
   className?: string
+  interruptedToolCallIds?: Set<string>
 }
 
 function SingleToolView({
   toolInvocations,
   defaultOpen = false,
   className,
+  interruptedToolCallIds,
 }: SingleToolViewProps) {
   // Group by toolCallId and pick the most informative state
   const groupedTools = toolInvocations.reduce(
@@ -136,6 +142,7 @@ function SingleToolView({
         toolData={toolsToDisplay[0]}
         defaultOpen={defaultOpen}
         className={className}
+        interruptedToolCallIds={interruptedToolCallIds}
       />
     )
   }
@@ -149,6 +156,7 @@ function SingleToolView({
             key={tool.toolInvocation.toolCallId}
             toolData={tool}
             defaultOpen={defaultOpen}
+            interruptedToolCallIds={interruptedToolCallIds}
           />
         ))}
       </div>
@@ -161,16 +169,19 @@ function SingleToolCard({
   toolData,
   defaultOpen = false,
   className,
+  interruptedToolCallIds,
 }: {
   toolData: ToolInvocationUIPart
   defaultOpen?: boolean
   className?: string
+  interruptedToolCallIds?: Set<string>
 }) {
   const [isExpanded, setIsExpanded] = useState(defaultOpen)
   const { toolInvocation } = toolData
   const { state, toolName, toolCallId, args } = toolInvocation
   const ToolIcon = getToolIcon(toolName)
-  const isLoading = state === "call"
+  const isAwaiting = state === "call" && !!interruptedToolCallIds?.has(toolCallId)
+  const isLoading = state === "call" && !isAwaiting
   const isCompleted = state === "result"
   const result = isCompleted ? toolInvocation.result : undefined
 
@@ -346,7 +357,20 @@ function SingleToolCard({
           <ToolIcon className="text-muted-foreground size-4" />
           <span className="font-mono text-sm">{toolName}</span>
           <AnimatePresence mode="popLayout" initial={false}>
-            {isLoading ? (
+            {isAwaiting ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, filter: "blur(2px)" }}
+                animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                exit={{ opacity: 0, scale: 0.9, filter: "blur(2px)" }}
+                transition={{ duration: 0.15 }}
+                key="awaiting"
+              >
+                <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+                  <HourglassIcon className="mr-1 h-3 w-3" />
+                  Awaiting Approval
+                </div>
+              </motion.div>
+            ) : isLoading ? (
               <motion.div
                 initial={{ opacity: 0, scale: 0.9, filter: "blur(2px)" }}
                 animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}

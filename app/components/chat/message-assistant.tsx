@@ -10,7 +10,7 @@ import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
 import { ArrowClockwise, Check, Copy, ThumbsDown, ThumbsUp } from "@phosphor-icons/react"
-import { useCallback, useRef } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { getSources } from "./get-sources"
 import { QuoteButton } from "./quote-button"
 import { Reasoning } from "./reasoning"
@@ -27,6 +27,7 @@ type MessageAssistantProps = {
   copyToClipboard?: () => void
   onReload?: () => void
   parts?: MessageAISDK["parts"]
+  annotations?: MessageAISDK["annotations"]
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
   messageId: string
@@ -42,6 +43,7 @@ export function MessageAssistant({
   copyToClipboard,
   onReload,
   parts,
+  annotations,
   status,
   className,
   messageId,
@@ -77,6 +79,25 @@ export function MessageAssistant({
           ? (part.toolInvocation?.result?.content?.[0]?.results ?? [])
           : []
       ) ?? []
+
+  // Build a set of toolCallIds that are currently awaiting approval
+  const interruptedToolCallIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (annotations) {
+      for (const ann of annotations) {
+        if (
+          ann &&
+          typeof ann === "object" &&
+          !Array.isArray(ann) &&
+          (ann as Record<string, unknown>).type === "tool_interrupt"
+        ) {
+          const toolCallId = (ann as Record<string, unknown>).toolCallId
+          if (typeof toolCallId === "string") ids.add(toolCallId)
+        }
+      }
+    }
+    return ids
+  }, [annotations])
 
   const isQuoteEnabled = !preferences.multiModelEnabled
   const messageRef = useRef<HTMLDivElement>(null)
@@ -117,7 +138,10 @@ export function MessageAssistant({
         {toolInvocationParts &&
           toolInvocationParts.length > 0 &&
           preferences.showToolInvocations && (
-            <ToolInvocation toolInvocations={toolInvocationParts} />
+            <ToolInvocation
+              toolInvocations={toolInvocationParts}
+              interruptedToolCallIds={interruptedToolCallIds}
+            />
           )}
 
         {searchImageResults.length > 0 && (

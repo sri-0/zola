@@ -13,6 +13,7 @@ import { UserProvider } from "@/lib/user-store/provider"
 import { ThemeProvider } from "next-themes"
 import { ClientOnly } from "./client-only"
 import { LayoutClient } from "./layout-client"
+import { ReactScan } from "./react-scan"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -40,6 +41,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <ReactScan />
         <ClientOnly>
           <TanstackQueryProvider>
             <LayoutClient />

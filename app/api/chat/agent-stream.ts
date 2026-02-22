@@ -1,40 +1,31 @@
 /**
  * agent-stream.ts
  * ---------------
- * Converts the OpenAI-compatible SSE stream from the LangGraph agent server
+ * Converts the OpenAI-compatible SSE stream from the LangGraph ReAct agent
  * into a Vercel AI SDK data stream that useChat can parse on the client.
  *
- * FastAPI emits standard OpenAI SSE fields plus four custom extension events:
+ * The agent runs a ReAct loop: planner → executor → planner → ...
+ * So the stream may contain N rounds of tool calls before the final answer.
  *
- *   Standard:
- *     choices[0].delta.reasoning_content  — thinking tokens (e.g. deepseek)
- *     choices[0].delta.tool_calls         — streamed tool call arguments
- *     choices[0].delta.content            — response text tokens
- *     finish_reason: "tool_calls"         — tool args complete; tools will run
- *     finish_reason: "stop"               — stream finished
+ * FastAPI SSE events:
+ *   Standard OpenAI chunks (tool call deltas, content, finish_reason)
+ *   {"agent_progress": {"phase":"...","message":"..."}}
+ *   {"tool_result":    {"toolCallId":"...","toolName":"...","result":{...}}}
+ *   {"tool_interrupt": {"toolCallId":"...","toolName":"...","prompt":"...",
+ *                        "details":{...},"thread_id":"..."}}
  *
- *   Custom extensions (from get_stream_writer / after interrupt check):
- *     data: {"agent_progress": {"phase":"...","message":"...","step":N,"total":N}}
- *     data: {"tool_result": {"toolCallId":"...","toolName":"...","result":{...}}}
- *     data: {"tool_interrupt": {"toolCallId":"...","toolName":"...","prompt":"...",
- *                               "details":{...},"thread_id":"..."}}
+ * AI SDK data stream emitted per ReAct round:
  *
- * Vercel AI SDK data stream parts emitted:
+ *   Round with tool calls (step N, isContinued:true):
+ *     f:{stepId}  →  2:[progress]  →  9:{tool}...  →  e:{tool-calls,isContinued:true}
  *
- *   No-tool path (single step):
- *     f:{messageId}  →  g: (optional reasoning)  →  0: text  →  e:{stop}  →  d:{stop}
+ *   Round with tool results + possibly more tool calls (step N+1):
+ *     f:{stepId}  →  a:{result}...  →  [next tool call chunks]  →  e:{tool-calls,isContinued:true}
+ *     ...or...
+ *     f:{stepId}  →  a:{result}...  →  0:{final text}  →  e:{stop}  →  d:{stop}
  *
- *   Tool path (two steps):
- *     Step 1: f:{messageId}  →  g: (reasoning)  →  9:{tool}  →  e:{tool-calls,isContinued:true}
- *     Step 2: f:{messageId}  →  2:[annotations]  →  a:{result}  →  0: text  →  e:{stop}  →  d:{stop}
- *
- *   Interrupt path (two steps, no tool results):
- *     Step 1: f:{messageId}  →  9:{tool}  →  e:{tool-calls,isContinued:true}
- *     Step 2: f:{messageId}  →  2:[{type:"tool_interrupt",...}]  →  e:{stop}  →  d:{stop}
- *
- *   Resume path (synthetic tool_calls from server + results + text):
- *     Step 1: f:{messageId}  →  9:{tool}  →  e:{tool-calls,isContinued:true}
- *     Step 2: f:{messageId}  →  2:[progress]  →  a:{result}  →  0: text  →  e:{stop}  →  d:{stop}
+ *   Interrupt path (no tool results, graph suspended):
+ *     f:{stepId}  →  2:[{tool_interrupt}]  →  e:{stop}  →  d:{stop}
  */
 
 const ZERO_USAGE = { promptTokens: 0, completionTokens: 0 }
@@ -57,36 +48,29 @@ export function convertAgentStream(
   const decoder = new TextDecoder()
 
   let buffer = ""
-  const toolCallMap = new Map<number, ToolCallAcc>()
-  let hadToolCalls = false
-  let step2Started = false
-  const step1Id = randomMsgId()
-  const step2Id = randomMsgId()
 
-  // Accumulate agent_progress annotations for step 2
-  const progressAnnotations: unknown[] = []
+  // Dynamic step management for N-round ReAct
+  let currentStepId    = randomMsgId()
+  let needNewStep      = false   // true after finish_reason:"tool_calls", cleared on next content
+  let currentToolCallMap = new Map<number, ToolCallAcc>()
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      const emit = (part: string) =>
-        controller.enqueue(encoder.encode(part))
+      const emit = (part: string) => controller.enqueue(encoder.encode(part))
 
-      // Always open step 1 immediately
-      emit(vai("f", { messageId: step1Id }))
+      // Always open the first step immediately
+      emit(vai("f", { messageId: currentStepId }))
 
-      const reader = sseStream.getReader()
-
-      const ensureStep2Open = () => {
-        if (!step2Started) {
-          step2Started = true
-          emit(vai("f", { messageId: step2Id }))
-          // Flush any buffered progress annotations into step 2
-          if (progressAnnotations.length > 0) {
-            emit(vai("2", progressAnnotations))
-            progressAnnotations.length = 0
-          }
+      // Open a new step if flagged (called before any content in the next round)
+      const ensureCurrentStep = () => {
+        if (needNewStep) {
+          needNewStep   = false
+          currentStepId = randomMsgId()
+          emit(vai("f", { messageId: currentStepId }))
         }
       }
+
+      const reader = sseStream.getReader()
 
       const processLine = (line: string) => {
         if (!line.startsWith("data: ")) return
@@ -100,50 +84,40 @@ export function convertAgentStream(
           return
         }
 
-        // ── Custom: agent_progress ────────────────────────────────────────────
+        // ── Custom: agent_progress ──────────────────────────────────────
         if (parsed.agent_progress) {
           const ap = parsed.agent_progress as {
-            phase: string
-            message: string
-            step?: number
-            total?: number
+            phase: string; message: string; step?: number; total?: number
           }
-          const annotation = {
+          ensureCurrentStep()   // progress may arrive right after a step close
+          emit(vai("2", [{
             type:    "agent_progress",
             phase:   ap.phase,
             message: ap.message,
             ...(ap.step  !== undefined && { step:  ap.step }),
             ...(ap.total !== undefined && { total: ap.total }),
-          }
-
-          if (step2Started) {
-            // Step 2 already open — emit immediately
-            emit(vai("2", [annotation]))
-          } else {
-            // Buffer until step 2 opens (progress before tool results)
-            progressAnnotations.push(annotation)
-          }
+          }]))
           return
         }
 
-        // ── Custom: tool_result ───────────────────────────────────────────────
+        // ── Custom: tool_result ─────────────────────────────────────────
         if (parsed.tool_result) {
           const tr = parsed.tool_result as { toolCallId: string; result: unknown }
-          ensureStep2Open()
+          ensureCurrentStep()   // open new step after tool_calls round
           emit(vai("a", { toolCallId: tr.toolCallId, result: tr.result }))
           return
         }
 
-        // ── Custom: tool_interrupt ────────────────────────────────────────────
+        // ── Custom: tool_interrupt ──────────────────────────────────────
         if (parsed.tool_interrupt) {
           const ti = parsed.tool_interrupt as Record<string, unknown>
-          ensureStep2Open()
+          ensureCurrentStep()
           emit(vai("2", [{ type: "tool_interrupt", ...ti }]))
           onInterrupt?.({ type: "tool_interrupt", ...ti })
           return
         }
 
-        // ── Standard OpenAI SSE ───────────────────────────────────────────────
+        // ── Standard OpenAI SSE ─────────────────────────────────────────
         const choices = parsed.choices as
           | Array<{ delta: Record<string, unknown>; finish_reason: string | null }>
           | undefined
@@ -155,7 +129,7 @@ export function convertAgentStream(
           emit(vai("g", delta.reasoning_content))
         }
 
-        // Tool call argument chunks — accumulate per index, emit as 9: on finish_reason
+        // Tool call argument chunks — accumulate per index
         if (Array.isArray(delta.tool_calls)) {
           for (const tc of delta.tool_calls as Array<{
             index: number
@@ -163,54 +137,37 @@ export function convertAgentStream(
             function?: { name?: string; arguments?: string }
           }>) {
             const idx = tc.index ?? 0
-            if (!toolCallMap.has(idx)) {
-              toolCallMap.set(idx, { id: "", name: "", args: "" })
+            if (!currentToolCallMap.has(idx)) {
+              currentToolCallMap.set(idx, { id: "", name: "", args: "" })
             }
-            const acc = toolCallMap.get(idx)!
-            if (tc.id) acc.id = tc.id
-            if (tc.function?.name) acc.name = tc.function.name
+            const acc = currentToolCallMap.get(idx)!
+            if (tc.id)              acc.id   = tc.id
+            if (tc.function?.name)  acc.name = tc.function.name
             if (tc.function?.arguments) acc.args += tc.function.arguments
           }
         }
 
         // Text content → 0:
         if (typeof delta.content === "string" && delta.content) {
-          if (hadToolCalls && !step2Started) {
-            ensureStep2Open()
-          }
+          ensureCurrentStep()   // open new step if coming after a tool round
           emit(vai("0", delta.content))
         }
 
-        // finish_reason: tool_calls → emit 9: parts + close step 1
+        // finish_reason: "tool_calls" → flush accumulated calls, close step, flag new step
         if (finish_reason === "tool_calls") {
-          hadToolCalls = true
-          for (const [, tc] of toolCallMap) {
+          for (const [, tc] of currentToolCallMap) {
             let args: unknown = tc.args
-            try {
-              args = JSON.parse(tc.args)
-            } catch {
-              /* keep as raw string */
-            }
+            try { args = JSON.parse(tc.args) } catch { /* keep raw */ }
             emit(vai("9", { toolCallId: tc.id, toolName: tc.name, args }))
           }
-          emit(vai("e", {
-            finishReason: "tool-calls",
-            usage: ZERO_USAGE,
-            isContinued: true,
-          }))
+          emit(vai("e", { finishReason: "tool-calls", usage: ZERO_USAGE, isContinued: true }))
+          currentToolCallMap = new Map()   // reset for next round
+          needNewStep        = true
         }
 
-        // finish_reason: stop → close current step + finish message
+        // finish_reason: "stop" → close current step and finish the message
         if (finish_reason === "stop") {
-          // Make sure step 2 is open if tools ran (even with no tool results, e.g. interrupt)
-          if (hadToolCalls && !step2Started) {
-            ensureStep2Open()
-          }
-          emit(vai("e", {
-            finishReason: "stop",
-            usage: ZERO_USAGE,
-            isContinued: false,
-          }))
+          emit(vai("e", { finishReason: "stop", usage: ZERO_USAGE, isContinued: false }))
           emit(vai("d", { finishReason: "stop", usage: ZERO_USAGE }))
         }
       }
@@ -222,9 +179,7 @@ export function convertAgentStream(
           buffer += decoder.decode(value, { stream: true })
           const lines = buffer.split("\n")
           buffer = lines.pop() ?? ""
-          for (const line of lines) {
-            processLine(line.trimEnd())
-          }
+          for (const line of lines) processLine(line.trimEnd())
         }
         if (buffer.trim()) processLine(buffer.trimEnd())
       } catch (err) {

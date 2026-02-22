@@ -71,10 +71,17 @@ async function saveAgentStream(
     }
     if (buf) parseLine(buf)
 
-    if (!textContent && toolCalls.size === 0) return
+    // Only keep tool calls that actually completed (have a result).
+    // Interrupted tool calls have no "a:" result event, so tc.result === undefined.
+    // Saving them would show a wrong "Completed" badge after DB sync.
+    const completedToolCalls = [...toolCalls.entries()].filter(
+      ([, tc]) => tc.result !== undefined
+    )
+
+    if (!textContent && completedToolCalls.length === 0) return
 
     const parts: unknown[] = [{ type: "step-start" }]
-    for (const [toolCallId, tc] of toolCalls) {
+    for (const [toolCallId, tc] of completedToolCalls) {
       parts.push({
         type: "tool-invocation",
         toolInvocation: {
@@ -177,7 +184,9 @@ export async function POST(req: Request) {
         return new Response(JSON.stringify({ error: text }), { status: 502 })
       }
 
-      const converted = convertAgentStream(resumeResp.body)
+      const converted = convertAgentStream(resumeResp.body, {
+        onInterrupt: (data) => interruptStore.set(chatId, data),
+      })
       const [clientStream, saveStream] = converted.tee()
       saveAgentStream(saveStream, chatId, model, message_group_id).catch(console.error)
 
