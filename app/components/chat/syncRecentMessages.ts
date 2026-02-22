@@ -16,12 +16,15 @@ export async function syncRecentMessages(
     const updated = [...prev]
     let changed = false
 
-    // Pair from the end; for each DB message (last to first),
+    // Pair from the end; for each DB message (last to first).
+    // Track lastMatchedIdx so the inner loop never re-matches a message
+    // that was already paired by a previous iteration.
+    let lastMatchedIdx = updated.length
     for (let d = lastFromDb.length - 1; d >= 0; d--) {
       const dbMsg = lastFromDb[d]
       const dbRole = dbMsg.role
 
-      for (let i = updated.length - 1; i >= 0; i--) {
+      for (let i = lastMatchedIdx - 1; i >= 0; i--) {
         const local = updated[i]
         if (local.role !== dbRole) continue
 
@@ -33,6 +36,7 @@ export async function syncRecentMessages(
           }
           changed = true
         }
+        lastMatchedIdx = i
         break
       }
     }

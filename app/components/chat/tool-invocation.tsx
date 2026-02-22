@@ -3,16 +3,35 @@
 import { cn } from "@/lib/utils"
 import type { ToolInvocationUIPart } from "@ai-sdk/ui-utils"
 import {
-  CaretDown,
-  CheckCircle,
-  Code,
-  Link,
-  Nut,
-  Spinner,
-  Wrench,
+  CaretDownIcon,
+  CheckCircleIcon,
+  CodeIcon,
+  DatabaseIcon,
+  FileSearchIcon,
+  GlobeIcon,
+  ImagesIcon,
+  LinkIcon,
+  MagnifyingGlassIcon,
+  SpinnerIcon,
+  WrenchIcon,
+  type Icon,
 } from "@phosphor-icons/react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useMemo, useState } from "react"
+
+// Map tool names to representative icons.
+// Add entries here as you add new tools to your agent.
+const TOOL_ICONS: Record<string, Icon> = {
+  query_database:      DatabaseIcon,
+  retrieve_documents:  FileSearchIcon,
+  imageSearch:         ImagesIcon,
+  webSearch:           GlobeIcon,
+  search:              MagnifyingGlassIcon,
+}
+
+function getToolIcon(toolName: string): Icon {
+  return TOOL_ICONS[toolName] ?? WrenchIcon
+}
 
 interface ToolInvocationProps {
   toolInvocations: ToolInvocationUIPart[]
@@ -30,8 +49,6 @@ export function ToolInvocation({
   toolInvocations,
   defaultOpen = false,
 }: ToolInvocationProps) {
-  const [isExpanded, setIsExpanded] = useState(defaultOpen)
-
   const toolInvocationsData = Array.isArray(toolInvocations)
     ? toolInvocations
     : [toolInvocations]
@@ -50,77 +67,20 @@ export function ToolInvocation({
   )
 
   const uniqueToolIds = Object.keys(groupedTools)
-  const isSingleTool = uniqueToolIds.length === 1
-
-  if (isSingleTool) {
-    return (
-      <SingleToolView
-        toolInvocations={toolInvocationsData}
-        defaultOpen={defaultOpen}
-        className="mb-10"
-      />
-    )
-  }
 
   return (
-    <div className="mb-10">
-      <div className="border-border flex flex-col gap-0 overflow-hidden rounded-md border">
-        <button
-          onClick={(e) => {
-            e.preventDefault()
-            setIsExpanded(!isExpanded)
-          }}
-          type="button"
-          className="hover:bg-accent flex w-full flex-row items-center rounded-t-md px-3 py-2 transition-colors"
-        >
-          <div className="flex flex-1 flex-row items-center gap-2 text-left text-base">
-            <Nut className="text-muted-foreground size-4" />
-            <span className="text-sm">Tools executed</span>
-            <div className="bg-secondary text-secondary-foreground rounded-full px-1.5 py-0.5 font-mono text-xs">
-              {uniqueToolIds.length}
-            </div>
-          </div>
-          <CaretDown
-            className={cn(
-              "h-4 w-4 transition-transform",
-              isExpanded ? "rotate-180 transform" : ""
-            )}
+    <div className="mb-10 flex flex-col gap-2">
+      {uniqueToolIds.map((toolId) => {
+        const toolInvocationsForId = groupedTools[toolId]
+        if (!toolInvocationsForId?.length) return null
+        return (
+          <SingleToolView
+            key={toolId}
+            toolInvocations={toolInvocationsForId}
+            defaultOpen={defaultOpen}
           />
-        </button>
-
-        <AnimatePresence initial={false}>
-          {isExpanded && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={TRANSITION}
-              className="overflow-hidden"
-            >
-              <div className="px-3 pt-3 pb-3">
-                <div className="space-y-2">
-                  {uniqueToolIds.map((toolId) => {
-                    const toolInvocationsForId = groupedTools[toolId]
-
-                    if (!toolInvocationsForId?.length) return null
-
-                    return (
-                      <div
-                        key={toolId}
-                        className="pb-2 last:border-0 last:pb-0"
-                      >
-                        <SingleToolView
-                          toolInvocations={toolInvocationsForId}
-                        />
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+        )
+      })}
     </div>
   )
 }
@@ -209,6 +169,7 @@ function SingleToolCard({
   const [isExpanded, setIsExpanded] = useState(defaultOpen)
   const { toolInvocation } = toolData
   const { state, toolName, toolCallId, args } = toolInvocation
+  const ToolIcon = getToolIcon(toolName)
   const isLoading = state === "call"
   const isCompleted = state === "result"
   const result = isCompleted ? toolInvocation.result : undefined
@@ -298,7 +259,7 @@ function SingleToolCard({
                     className="text-primary group flex items-center gap-1 font-medium hover:underline"
                   >
                     {item.title}
-                    <Link className="h-3 w-3 opacity-70 transition-opacity group-hover:opacity-100" />
+                    <LinkIcon className="h-3 w-3 opacity-70 transition-opacity group-hover:opacity-100" />
                   </a>
                   <div className="text-muted-foreground mt-1 font-mono text-xs">
                     {item.url}
@@ -344,7 +305,7 @@ function SingleToolCard({
                 className="text-primary flex items-center gap-1 hover:underline"
               >
                 <span className="font-mono">{htmlUrl}</span>
-                <Link className="h-3 w-3 opacity-70" />
+                <LinkIcon className="h-3 w-3 opacity-70" />
               </a>
             </div>
           )}
@@ -382,7 +343,7 @@ function SingleToolCard({
         className="hover:bg-accent flex w-full flex-row items-center rounded-t-md px-3 py-2 transition-colors"
       >
         <div className="flex flex-1 flex-row items-center gap-2 text-left text-base">
-          <Wrench className="text-muted-foreground size-4" />
+          <ToolIcon className="text-muted-foreground size-4" />
           <span className="font-mono text-sm">{toolName}</span>
           <AnimatePresence mode="popLayout" initial={false}>
             {isLoading ? (
@@ -394,7 +355,7 @@ function SingleToolCard({
                 key="loading"
               >
                 <div className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-400">
-                  <Spinner className="mr-1 h-3 w-3 animate-spin" />
+                  <SpinnerIcon className="mr-1 h-3 w-3 animate-spin" />
                   Running
                 </div>
               </motion.div>
@@ -407,14 +368,14 @@ function SingleToolCard({
                 key="completed"
               >
                 <div className="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-1.5 py-0.5 text-xs text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-400">
-                  <CheckCircle className="mr-1 h-3 w-3" />
+                  <CheckCircleIcon className="mr-1 h-3 w-3" />
                   Completed
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
-        <CaretDown
+        <CaretDownIcon
           className={cn(
             "h-4 w-4 transition-transform",
             isExpanded ? "rotate-180 transform" : ""
@@ -463,7 +424,7 @@ function SingleToolCard({
               {/* Tool call ID */}
               <div className="text-muted-foreground flex items-center justify-between text-xs">
                 <div className="flex items-center">
-                  <Code className="mr-1 inline size-3" />
+                  <CodeIcon className="mr-1 inline size-3" />
                   Tool Call ID:{" "}
                   <span className="ml-1 font-mono">{toolCallId}</span>
                 </div>

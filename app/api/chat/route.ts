@@ -3,6 +3,7 @@ import { getAIModel } from "@/lib/ai/provider"
 import { prisma } from "@/lib/db"
 import { sanitizeUserInput } from "@/lib/sanitize"
 import { Message as MessageAISDK, streamText, ToolSet } from "ai"
+import { convertAgentStream } from "./agent-stream"
 import { saveFinalAssistantMessage } from "./db"
 import { createErrorResponse, extractErrorMessage } from "./utils"
 
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // Log user message
+    // Save user message
     if (userMessage?.role === "user") {
       const content =
         typeof userMessage.content === "string" ? userMessage.content : ""
@@ -68,6 +69,102 @@ export async function POST(req: Request) {
       })
     }
 
+    // ---------------------------------------------------------------------------
+    // Agent proxy path — for models whose server handles the full agentic loop
+    // and streams back in Vercel AI SDK data stream format directly.
+    // The stream is passed through as-is; no streamText processing needed.
+    // ---------------------------------------------------------------------------
+    if (model === "test-agent") {
+      const baseUrl = process.env.AI_BASE_URL ?? "http://localhost:8000/v1"
+      const agentResp = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.AI_API_KEY ?? "test"}`,
+        },
+        body: JSON.stringify({ model, messages, stream: true }),
+      })
+
+      if (!agentResp.ok || !agentResp.body) {
+        const text = await agentResp.text().catch(() => "unknown error")
+        console.error("Agent server error:", text)
+        return new Response(JSON.stringify({ error: text }), { status: 502 })
+      }
+
+      const converted = convertAgentStream(agentResp.body)
+      const [clientStream, saveStream] = converted.tee()
+
+      // Asynchronously consume the save copy — reconstruct the full parts
+      // structure (text + tool invocations) and persist it the same way
+      // saveFinalAssistantMessage does for normal models.
+      ;(async () => {
+        const decoder = new TextDecoder()
+        const reader = saveStream.getReader()
+        let buf = ""
+        let textContent = ""
+        const toolCalls = new Map<string, { toolName: string; args: unknown; result?: unknown }>()
+
+        const parseLine = (line: string) => {
+          const sep = line.indexOf(":")
+          if (sep === -1) return
+          const type = line.slice(0, sep)
+          try {
+            const val = JSON.parse(line.slice(sep + 1))
+            if (type === "0") textContent += val
+            else if (type === "9") toolCalls.set(val.toolCallId, { toolName: val.toolName, args: val.args })
+            else if (type === "a") { const tc = toolCalls.get(val.toolCallId); if (tc) tc.result = val.result }
+          } catch {}
+        }
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buf += decoder.decode(value, { stream: true })
+            const lines = buf.split("\n")
+            buf = lines.pop() ?? ""
+            for (const line of lines) parseLine(line)
+          }
+          if (buf) parseLine(buf)
+
+          if (!textContent && toolCalls.size === 0) return
+
+          const parts: unknown[] = [{ type: "step-start" }]
+          for (const [toolCallId, tc] of toolCalls) {
+            parts.push({
+              type: "tool-invocation",
+              toolInvocation: { state: "result", step: 0, toolCallId, toolName: tc.toolName, args: tc.args, result: tc.result },
+            })
+          }
+          if (textContent) parts.push({ type: "text", text: textContent })
+
+          await prisma.message.create({
+            data: {
+              chatId,
+              role: "assistant",
+              content: textContent,
+              parts: JSON.stringify(parts),
+              model,
+              messageGroupId: message_group_id || null,
+            },
+          })
+        } catch (err) {
+          console.error("Failed to save agent assistant message:", err)
+        }
+      })()
+
+      return new Response(clientStream, {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "X-Vercel-AI-Data-Stream": "v1",
+          "Cache-Control": "no-cache",
+        },
+      })
+    }
+
+    // ---------------------------------------------------------------------------
+    // Standard path — streamText with the configured AI provider
+    // ---------------------------------------------------------------------------
     const aiModel = getAIModel(model)
     const effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT_DEFAULT
 
@@ -80,7 +177,6 @@ export async function POST(req: Request) {
       onError: (err: unknown) => {
         console.error("Streaming error occurred:", err)
       },
-
       onFinish: async ({ response }) => {
         try {
           await saveFinalAssistantMessage(

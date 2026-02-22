@@ -11,6 +11,7 @@ import { TanstackQueryProvider } from "@/lib/tanstack-query/tanstack-query-provi
 import { UserPreferencesProvider } from "@/lib/user-preference-store/provider"
 import { UserProvider } from "@/lib/user-store/provider"
 import { ThemeProvider } from "next-themes"
+import { ClientOnly } from "./client-only"
 import { LayoutClient } from "./layout-client"
 
 const geistSans = Geist({
@@ -39,35 +40,37 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <TanstackQueryProvider>
-          <LayoutClient />
-          <UserProvider>
-            <ModelProvider>
-              <ChatsProvider>
-                <ChatSessionProvider>
-                  <UserPreferencesProvider>
-                    <TooltipProvider
-                      delayDuration={200}
-                      skipDelayDuration={500}
-                    >
-                      <ThemeProvider
-                        attribute="class"
-                        defaultTheme="light"
-                        enableSystem
-                        disableTransitionOnChange
+        <ClientOnly>
+          <TanstackQueryProvider>
+            <LayoutClient />
+            <UserProvider>
+              <ModelProvider>
+                <ChatsProvider>
+                  <ChatSessionProvider>
+                    <UserPreferencesProvider>
+                      <TooltipProvider
+                        delayDuration={200}
+                        skipDelayDuration={500}
                       >
-                        <SidebarProvider defaultOpen>
-                          <Toaster position="top-center" />
-                          {children}
-                        </SidebarProvider>
-                      </ThemeProvider>
-                    </TooltipProvider>
-                  </UserPreferencesProvider>
-                </ChatSessionProvider>
-              </ChatsProvider>
-            </ModelProvider>
-          </UserProvider>
-        </TanstackQueryProvider>
+                        <ThemeProvider
+                          attribute="class"
+                          defaultTheme="light"
+                          enableSystem
+                          disableTransitionOnChange
+                        >
+                          <SidebarProvider defaultOpen>
+                            <Toaster position="top-center" />
+                            {children}
+                          </SidebarProvider>
+                        </ThemeProvider>
+                      </TooltipProvider>
+                    </UserPreferencesProvider>
+                  </ChatSessionProvider>
+                </ChatsProvider>
+              </ModelProvider>
+            </UserProvider>
+          </TanstackQueryProvider>
+        </ClientOnly>
       </body>
     </html>
   )

@@ -47,9 +47,9 @@ export function Conversation({
             scrollbarWidth: "none",
           }}
         >
-          {messages?.map((message, index) => {
+          {messages?.filter((message, index, arr) => arr.findIndex(m => m.id === message.id) === index).map((message, index, arr) => {
             const isLast =
-              index === messages.length - 1 && status !== "submitted"
+              index === arr.length - 1 && status !== "submitted"
             const hasScrollAnchor =
               isLast && messages.length > initialMessageCount.current
 

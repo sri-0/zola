@@ -262,6 +262,9 @@ export function ChatInput({
           </PromptInput>
         </div>
       </div>
+      <p className="text-muted-foreground/60 order-3 -mt-2 text-center text-xs pb-2">
+        Zola is AI and can make mistakes. Always check with multiple sources.
+      </p>
     </div>
   )
 }
