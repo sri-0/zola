@@ -8,10 +8,12 @@ import { getOllamaModels, ollamaModels } from "./data/ollama"
 import { openaiModels } from "./data/openai"
 import { openrouterModels } from "./data/openrouter"
 import { perplexityModels } from "./data/perplexity"
+import { localAgentModels } from "./data/local-agents"
 import { ModelConfig } from "./types"
 
 // Static models (always available)
 const STATIC_MODELS: ModelConfig[] = [
+  ...localAgentModels,
   ...openaiModels,
   ...mistralModels,
   ...deepseekModels,

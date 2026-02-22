@@ -14,6 +14,7 @@ type MessageProps = {
   onReload: () => void
   hasScrollAnchor?: boolean
   parts?: MessageType["parts"]
+  annotations?: MessageType["annotations"]
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
   onQuote?: (text: string, messageId: string) => void
@@ -32,6 +33,7 @@ export function Message({
   onReload,
   hasScrollAnchor,
   parts,
+  annotations,
   status,
   className,
   onQuote,
@@ -75,6 +77,7 @@ export function Message({
         isLast={isLast}
         hasScrollAnchor={hasScrollAnchor}
         parts={parts}
+        annotations={annotations}
         status={status}
         className={className}
         messageId={id}

@@ -56,3 +56,5 @@ bun.lock
 /lib/generated/prisma
 
 *.db
+*.pyc
+__pycache__
