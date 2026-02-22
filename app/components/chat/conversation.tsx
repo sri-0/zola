@@ -47,7 +47,11 @@ export function Conversation({
             scrollbarWidth: "none",
           }}
         >
-          {messages?.filter((message, index, arr) => arr.findIndex(m => m.id === message.id) === index).map((message, index, arr) => {
+          {messages
+            ?.filter((message, index, arr) => arr.findIndex(m => m.id === message.id) === index)
+            // Filter out internal RESUME: signals sent to trigger agent resume
+            .filter((m) => !(m.role === "user" && typeof m.content === "string" && m.content.startsWith("RESUME:")))
+            .map((message, index, arr) => {
             const isLast =
               index === arr.length - 1 && status !== "submitted"
             const hasScrollAnchor =

@@ -4,33 +4,37 @@
  * Converts the OpenAI-compatible SSE stream from the LangGraph agent server
  * into a Vercel AI SDK data stream that useChat can parse on the client.
  *
- * FastAPI emits standard OpenAI SSE fields:
- *   choices[0].delta.reasoning_content  — thinking / chain-of-thought tokens
- *   choices[0].delta.tool_calls         — streamed tool call arguments
- *   choices[0].delta.content            — text response tokens
- *   finish_reason: "tool_calls"         — all tool args delivered; results follow
- *   finish_reason: "stop"               — stream finished
+ * FastAPI emits standard OpenAI SSE fields plus four custom extension events:
  *
- * Plus one custom extension line (after finish_reason:"tool_calls"):
- *   data: {"tool_result":{"toolCallId":"...","toolName":"...","result":{...}}}
+ *   Standard:
+ *     choices[0].delta.reasoning_content  — thinking tokens (e.g. deepseek)
+ *     choices[0].delta.tool_calls         — streamed tool call arguments
+ *     choices[0].delta.content            — response text tokens
+ *     finish_reason: "tool_calls"         — tool args complete; tools will run
+ *     finish_reason: "stop"               — stream finished
  *
- * Vercel AI SDK data stream parts emitted (protocol v1):
+ *   Custom extensions (from get_stream_writer / after interrupt check):
+ *     data: {"agent_progress": {"phase":"...","message":"...","step":N,"total":N}}
+ *     data: {"tool_result": {"toolCallId":"...","toolName":"...","result":{...}}}
+ *     data: {"tool_interrupt": {"toolCallId":"...","toolName":"...","prompt":"...",
+ *                               "details":{...},"thread_id":"..."}}
  *
- *   Step 1 — reasoning + tool call requests:
- *     f:{messageId}
- *     g:"token"                               reasoning  → Reasoning component
- *     9:{toolCallId,toolName,args}            tool call  → "Running" card
- *     e:{finishReason:"tool-calls",isContinued:true}
- *
- *   Step 2 — tool results + text (only opened when tools ran):
- *     f:{messageId}
- *     a:{toolCallId,result}                   result     → card flips to "Completed"
- *     0:"token"                               text chunk
- *     e:{finishReason:"stop",isContinued:false}
- *     d:{finishReason:"stop"}
+ * Vercel AI SDK data stream parts emitted:
  *
  *   No-tool path (single step):
- *     f:{messageId}  →  g: (optional)  →  0: text  →  e:{stop}  →  d:{stop}
+ *     f:{messageId}  →  g: (optional reasoning)  →  0: text  →  e:{stop}  →  d:{stop}
+ *
+ *   Tool path (two steps):
+ *     Step 1: f:{messageId}  →  g: (reasoning)  →  9:{tool}  →  e:{tool-calls,isContinued:true}
+ *     Step 2: f:{messageId}  →  2:[annotations]  →  a:{result}  →  0: text  →  e:{stop}  →  d:{stop}
+ *
+ *   Interrupt path (two steps, no tool results):
+ *     Step 1: f:{messageId}  →  9:{tool}  →  e:{tool-calls,isContinued:true}
+ *     Step 2: f:{messageId}  →  2:[{type:"tool_interrupt",...}]  →  e:{stop}  →  d:{stop}
+ *
+ *   Resume path (synthetic tool_calls from server + results + text):
+ *     Step 1: f:{messageId}  →  9:{tool}  →  e:{tool-calls,isContinued:true}
+ *     Step 2: f:{messageId}  →  2:[progress]  →  a:{result}  →  0: text  →  e:{stop}  →  d:{stop}
  */
 
 const ZERO_USAGE = { promptTokens: 0, completionTokens: 0 }
@@ -46,7 +50,8 @@ function randomMsgId(): string {
 type ToolCallAcc = { id: string; name: string; args: string }
 
 export function convertAgentStream(
-  sseStream: ReadableStream<Uint8Array>
+  sseStream: ReadableStream<Uint8Array>,
+  { onInterrupt }: { onInterrupt?: (data: Record<string, unknown>) => void } = {}
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
   const decoder = new TextDecoder()
@@ -58,6 +63,9 @@ export function convertAgentStream(
   const step1Id = randomMsgId()
   const step2Id = randomMsgId()
 
+  // Accumulate agent_progress annotations for step 2
+  const progressAnnotations: unknown[] = []
+
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       const emit = (part: string) =>
@@ -67,6 +75,18 @@ export function convertAgentStream(
       emit(vai("f", { messageId: step1Id }))
 
       const reader = sseStream.getReader()
+
+      const ensureStep2Open = () => {
+        if (!step2Started) {
+          step2Started = true
+          emit(vai("f", { messageId: step2Id }))
+          // Flush any buffered progress annotations into step 2
+          if (progressAnnotations.length > 0) {
+            emit(vai("2", progressAnnotations))
+            progressAnnotations.length = 0
+          }
+        }
+      }
 
       const processLine = (line: string) => {
         if (!line.startsWith("data: ")) return
@@ -80,18 +100,50 @@ export function convertAgentStream(
           return
         }
 
-        // ── Custom extension: tool_result ────────────────────────────────────
+        // ── Custom: agent_progress ────────────────────────────────────────────
+        if (parsed.agent_progress) {
+          const ap = parsed.agent_progress as {
+            phase: string
+            message: string
+            step?: number
+            total?: number
+          }
+          const annotation = {
+            type:    "agent_progress",
+            phase:   ap.phase,
+            message: ap.message,
+            ...(ap.step  !== undefined && { step:  ap.step }),
+            ...(ap.total !== undefined && { total: ap.total }),
+          }
+
+          if (step2Started) {
+            // Step 2 already open — emit immediately
+            emit(vai("2", [annotation]))
+          } else {
+            // Buffer until step 2 opens (progress before tool results)
+            progressAnnotations.push(annotation)
+          }
+          return
+        }
+
+        // ── Custom: tool_result ───────────────────────────────────────────────
         if (parsed.tool_result) {
           const tr = parsed.tool_result as { toolCallId: string; result: unknown }
-          if (!step2Started) {
-            step2Started = true
-            emit(vai("f", { messageId: step2Id }))
-          }
+          ensureStep2Open()
           emit(vai("a", { toolCallId: tr.toolCallId, result: tr.result }))
           return
         }
 
-        // ── Standard OpenAI SSE ──────────────────────────────────────────────
+        // ── Custom: tool_interrupt ────────────────────────────────────────────
+        if (parsed.tool_interrupt) {
+          const ti = parsed.tool_interrupt as Record<string, unknown>
+          ensureStep2Open()
+          emit(vai("2", [{ type: "tool_interrupt", ...ti }]))
+          onInterrupt?.({ type: "tool_interrupt", ...ti })
+          return
+        }
+
+        // ── Standard OpenAI SSE ───────────────────────────────────────────────
         const choices = parsed.choices as
           | Array<{ delta: Record<string, unknown>; finish_reason: string | null }>
           | undefined
@@ -103,7 +155,7 @@ export function convertAgentStream(
           emit(vai("g", delta.reasoning_content))
         }
 
-        // Tool call argument chunks — accumulate per index, emit as 9: later
+        // Tool call argument chunks — accumulate per index, emit as 9: on finish_reason
         if (Array.isArray(delta.tool_calls)) {
           for (const tc of delta.tool_calls as Array<{
             index: number
@@ -121,17 +173,15 @@ export function convertAgentStream(
           }
         }
 
-        // Text content → 0: (if tools ran, open step 2 first)
+        // Text content → 0:
         if (typeof delta.content === "string" && delta.content) {
           if (hadToolCalls && !step2Started) {
-            step2Started = true
-            emit(vai("f", { messageId: step2Id }))
+            ensureStep2Open()
           }
           emit(vai("0", delta.content))
         }
 
-        // finish_reason: tool_calls
-        // Emit each accumulated tool call as a complete 9: part, then close step 1
+        // finish_reason: tool_calls → emit 9: parts + close step 1
         if (finish_reason === "tool_calls") {
           hadToolCalls = true
           for (const [, tc] of toolCallMap) {
@@ -143,24 +193,24 @@ export function convertAgentStream(
             }
             emit(vai("9", { toolCallId: tc.id, toolName: tc.name, args }))
           }
-          emit(
-            vai("e", {
-              finishReason: "tool-calls",
-              usage: ZERO_USAGE,
-              isContinued: true,
-            })
-          )
+          emit(vai("e", {
+            finishReason: "tool-calls",
+            usage: ZERO_USAGE,
+            isContinued: true,
+          }))
         }
 
-        // finish_reason: stop — close current step + finish message
+        // finish_reason: stop → close current step + finish message
         if (finish_reason === "stop") {
-          emit(
-            vai("e", {
-              finishReason: "stop",
-              usage: ZERO_USAGE,
-              isContinued: false,
-            })
-          )
+          // Make sure step 2 is open if tools ran (even with no tool results, e.g. interrupt)
+          if (hadToolCalls && !step2Started) {
+            ensureStep2Open()
+          }
+          emit(vai("e", {
+            finishReason: "stop",
+            usage: ZERO_USAGE,
+            isContinued: false,
+          }))
           emit(vai("d", { finishReason: "stop", usage: ZERO_USAGE }))
         }
       }

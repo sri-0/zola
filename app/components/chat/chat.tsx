@@ -13,7 +13,8 @@ import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
 import { AnimatePresence, motion } from "motion/react"
 import { redirect } from "next/navigation"
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ToolInterrupt, type ToolInterruptAnnotation } from "./tool-interrupt"
 import { useChatCore } from "./use-chat-core"
 import { useChatOperations } from "./use-chat-operations"
 import { useFileUpload } from "./use-file-upload"
@@ -103,6 +104,7 @@ export function Chat() {
     handleReload,
     handleInputChange,
     submitEdit,
+    append,
   } = useChatCore({
     initialMessages,
     draftValue,
@@ -188,6 +190,68 @@ export function Chat() {
     ]
   )
 
+  // Interrupt card state — held in component state so it survives message reconciliation
+  // (message.annotations gets wiped when onFinish calls syncRecentMessages from DB).
+  const [pendingInterrupt, setPendingInterrupt] = useState<ToolInterruptAnnotation | null>(null)
+  const handledThreadIdRef = useRef<string | null>(null)
+
+  // Clear interrupt when navigating to a different chat
+  useEffect(() => {
+    setPendingInterrupt(null)
+    handledThreadIdRef.current = null
+  }, [chatId])
+
+  // When the stream ends, check the server for a pending tool interrupt.
+  // The route stores it synchronously as bytes flow through; by the time
+  // status === "ready" the store is guaranteed to have been written.
+  useEffect(() => {
+    if (status !== "ready" || !chatId) return
+    fetch(`/api/chat?interrupt=${encodeURIComponent(chatId)}`)
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        const d = data as Record<string, unknown> | null
+        if (
+          d?.type === "tool_interrupt" &&
+          typeof d.thread_id === "string" &&
+          d.thread_id !== handledThreadIdRef.current
+        ) {
+          setPendingInterrupt(d as unknown as ToolInterruptAnnotation)
+        }
+      })
+      .catch(() => {})
+  }, [status, chatId])
+
+  // When the user approves/denies/skips an interrupt, send the resume signal.
+  // We send a special "RESUME:<action>:<thread_id>" user message that route.ts
+  // intercepts and forwards to the FastAPI resume endpoint.
+  // The message is filtered from the conversation UI in conversation.tsx.
+  const handleInterruptResume = useCallback(
+    async (action: "approved" | "denied" | "skipped", threadId: string) => {
+      const uid = await import("@/lib/api").then((m) => m.getOrCreateGuestUserId(user))
+      if (!uid || !chatId) return
+
+      // Clear the interrupt card immediately and prevent re-triggering for this thread
+      handledThreadIdRef.current = threadId
+      setPendingInterrupt(null)
+
+      const currentChatId = chatId
+      append(
+        { role: "user", content: `RESUME:${action}:${threadId}` },
+        {
+          body: {
+            chatId: currentChatId,
+            userId: uid,
+            model: selectedModel,
+            isAuthenticated,
+            systemPrompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
+            enableSearch,
+          },
+        }
+      )
+    },
+    [append, chatId, user, selectedModel, isAuthenticated, systemPrompt, enableSearch]
+  )
+
   // Handle redirect for invalid chatId - only redirect if we're certain the chat doesn't exist
   // and we're not in a transient state during chat creation
   if (
@@ -247,6 +311,15 @@ export function Chat() {
           },
         }}
       >
+        {/* Tool interrupt approval card — shown above chat input when agent needs approval */}
+        {pendingInterrupt && (
+          <div className="px-2 pb-3">
+            <ToolInterrupt
+              interrupt={pendingInterrupt}
+              onApprove={handleInterruptResume}
+            />
+          </div>
+        )}
         <ChatInput {...chatInputProps} />
       </motion.div>
 
